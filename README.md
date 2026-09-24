@@ -1,0 +1,214 @@
+# Captain's Deck
+
+Captain's Deck is a read-only **Firstmate flow** kanban plugin for [Herdr](https://herdr.dev).
+
+Source: <https://github.com/Enk1do/captains-deck>
+
+One board, every crew: the captain home plus each secondmate home appear as crew
+tabs at the top. Each tab projects that home's bearings snapshot into five fixed
+columns. Nothing is ever written back, with one deliberate exception: a
+Captain's Call answer (see below), where the captain's own decision goes to
+Firstmate's guarded keyed-answer intake.
+
+| Column | Source |
+| --- | --- |
+| **Charted Next** | `gates` |
+| **Underway** | every `in_flight` row (badges carry `working` / `validating` / `parked` / `paused` / `failed`) |
+| **Captain's Call** | `decisions_open` - click a ticket to decide it in place |
+| **Awaiting Merge** | `in_flight` rows whose Firstmate `state` is `done` (crew finished, waiting on merge/review) |
+| **Landed** | `landed` — Firstmate's "Recently Landed": merged PRs, completed scouts, local-only merges (hidden by default here; toggle with `L`) |
+
+Firstmate's own bearings has four sections (Underway, Charted Next, Captain's Call,
+Recently Landed) and deliberately keeps run status out of the section split.
+Awaiting Merge is the only added projection: Firstmate's own `state == "done"`
+rows, which are the ones waiting on a merge.
+
+The board uses **Firstmate's own bounds** by default (`FM_BEARINGS_LANDED` = 6
+newest per home, gates/in-flight = 20). `FM_FLOW_ALL=1` requests every row.
+
+Crew tabs show a live activity dot (`●` working/blocked, `○` agent present) and
+the number of tickets on that board once it has been visited; a visited board
+with no tickets shows `(0)`.
+
+## What each ticket shows
+
+```text
+╭─ demo-issue-197 ───╮
+│ ◐ validating       │   live badge
+│ claude·opus·xhigh  │   harness · model · thinking effort
+│ Add retry to the…  │   title / summary / landed what
+│ validating (runni… │   current activity (bearings "doing", gate reason)
+│ ⌸ 4/my-app-feat…   │   worktree (or ↗ PR artifact for landed)
+╰────────────────────╯
+```
+
+Badges: `● working`, `◐ validating`, `⛔ blocked`, `⚑ decision` /
+`⚑ captain`, `◍ awaits merge`, `⏸ parked` / `⏸ paused`, `⛔ failed`,
+`✓ done` / `✓ landed`, `· queued`.
+Live state comes from `herdr agent list`; activity and review state come from
+Firstmate's bearings snapshot and the home's `state/<task>.status` tail.
+
+## Answering a Captain's Call ticket
+
+Clicking a Captain's Call ticket (or pressing `Enter` on it) opens its decision
+card as a modal, composed from the same `fm-bearings-board.v1` card the Lavish
+bearings board renders: the type badge and repo, the title, the `ABOUT` /
+`DECIDE` context, every authored option with its hint, the `REC` mark on the
+recommended one, a freeform note row, and **Queue answer**.
+
+- `↑`/`↓` (or `j`/`k`) move, `space` picks or clears an option, typing edits
+the note, `Tab` jumps between the options and the note, `Enter` queues, and
+`esc` closes without answering.
+- The answer is piped to Firstmate's one keyed-answer intake
+(`bin/fm-captain-hold.sh answers`) in the home that owns the ticket, with this
+Deck as its provenance. A card that declares `close: "release"` releases the
+gated work instead of completing it.
+- After the record lands, the Deck steers the agent that owns the call through
+the parent home's lane inbox (`fm-send.sh`), so a released item resumes and a
+re-check actually gets worked. A wake problem is shown beside the queued state;
+the recorded answer is never reversed.
+- `Reconcile` is the reserved value: it files a durable reconcile request
+through `reconcile-requests`, binding `herdr-firstmate-flow` as its captured
+source on first use, and never closes anything by itself. The call leaves
+Captain's Call immediately - the snapshot buckets it `reconciling` and shows it
+under Charted Next as `reconcile requested <time>` - and returns only if the
+owner finds it still active.
+- Card content is read from the live board, then the durable store the board
+build writes (`state/decision-cards/<task>.json`), then the composed payload
+history. That store is what keeps the authored options available after a board
+rebuild.
+- When no composed card exists for a ticket, the dialog still opens with its
+durable title, its hold reason as the `ABOUT` line, a freeform answer, and
+`Reconcile`.
+- Nothing is resolved by the board itself: every guard, the durable decision,
+and the close all live in Firstmate.
+
+## Freshness: only what changed is refreshed
+
+The board never redraws itself wholesale.
+
+- **Live tick (2s):** the active board rebuilds its badges from cheap sources —
+  Herdr's agent/pane list, each task's `state/<id>.meta` and the tail of
+  `state/<id>.status` (both cached by mtime).
+- **Bearings (20s):** the expensive `fm-bearings-snapshot.sh` run only happens
+  when the cached snapshot is older than `FM_FLOW_BEARINGS_SECS`, when you switch
+  to a crew that has no cached data, or when you press `r`.
+- **Diff repaint:** only the screen lines that actually changed are written, so a
+  badge updating does not disturb your scroll position, selection, or the rest of
+  the board.
+- **Only the active crew** is refreshed; other crews cost nothing while you look
+  at one board.
+
+## Interaction
+
+| Action | What happens |
+| --- | --- |
+| Click a **crew name** (top row) | Switch instantly; cached cards paint at once, then bearings refreshes |
+| Click a **ticket** | Focus the ticket's Herdr tab/pane, which selects that agent in the Herdr agents sidebar |
+| Click a Captain's Call **ticket** | Open its decision card modal and queue the captain's answer |
+| Click a ticket with no live pane | Footer explains it, e.g. `demo-issue-198: no live pane · (no worktree yet)` |
+| `1`…`9`, `Tab` / `Shift+Tab`, `[` / `]` | Switch crew |
+| `←`/`→` or `h`/`l` | Move between columns |
+| `↑`/`↓` or `j`/`k` | Move between tickets (the view follows the selection) |
+| Mouse **wheel over a column** | Scroll that column smoothly (3 rows per notch) |
+| `Shift`+wheel | Scroll every column together |
+| `PgUp`/`PgDn`, `g`/`G` | Page / jump within the selected column |
+| `Enter` | Decide the selected Captain's Call ticket; any other ticket opens its agent pane |
+| `o` | Open the selected ticket's agent pane, including a Captain's Call one |
+| `r` / `q` | Force a bearings refresh / quit |
+| `L` | Show/hide the Landed column |
+
+Input repaints immediately (no waiting for the next data tick), and a burst of
+wheel events is coalesced into a single repaint. Scrolling moves by terminal
+rows, so cards clip at the edges instead of jumping a whole 8-row card.
+
+Ticket → pane mapping comes from the task's `state/<task>.meta`
+(`herdr_pane_id`, `herdr_tab_id`, `herdr_workspace_id`), with a fallback to
+matching the worktree path against live pane working directories. The `herdr`
+binary is resolved from `HERDR_BIN_PATH`, then `PATH`, then `~/.local/bin/herdr`
+(plugin panes inherit a minimal `PATH`).
+
+## Theme
+
+Ticket borders, badges, and column titles use the terminal's **ANSI palette**
+(basic 16 colours, no hardcoded RGB or 256-colour indexes), so they follow
+whatever palette the Herdr `[theme]` setting gives the panes.
+
+## Requirements
+
+- Herdr >= 0.9.0
+- Firstmate homes with `bin/fm-bearings-snapshot.sh`
+- `python3` (standard library only), no `jq` required
+
+## Home discovery
+
+Homes are discovered in this order (first match wins per path):
+
+1. `FM_FLOW_HOMES` environment variable — `label=path label=path`
+2. `homes.conf` in the plugin config directory — one `label=path` per line
+3. `FM_HOME` or the legacy `fm_home` config file
+4. `~/firstmate` plus `~/.treehouse/*/*/firstmate` worktree homes
+
+A home is shown when it has task directories **or** a live Herdr agent running
+in it. An unleased spare treehouse worktree - no lease holder, no presentation
+label, no live agent - is hidden, because it is a slot rather than a crew. Labels come from the treehouse lease holder
+(`~/.treehouse/*/treehouse-state.json`) or a task's
+`state/*.herdr-presentation` `parent_label`, so secondmates appear as e.g.
+`2ndmate-demo`.
+
+Plugin config lives in:
+
+```text
+~/.config/herdr/plugins/config/herdr-firstmate-flow/
+  fm_home        # legacy single-home config (still honored)
+  homes.conf     # optional label=path list
+  show_landed    # optional: 0 hides the Landed column
+  debug_log      # optional: a path, or an empty file for <config>/debug_log.log
+```
+
+Environment knobs:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `FM_FLOW_TICK_SECS` | `2` | Live badge/agent refresh |
+| `FM_FLOW_BEARINGS_SECS` | `20` | Bearings snapshot TTL |
+| `FM_FLOW_WHEEL_ROWS` | `3` | Rows moved per wheel notch |
+| `FM_FLOW_LANDED_LIMIT` | `10` | Safety cap on landed cards (Firstmate's own bound is 6/home) |
+| `FM_FLOW_SHOW_LANDED` | `1` | Show the Landed column (`0` = hide it, also toggleable with `L`) |
+| `FM_FLOW_ALL` | `0` | `1` = request every row from bearings instead of Firstmate's bounds |
+| `FM_FLOW_HOMES` | — | Explicit `label=path` crew list |
+| `FM_FLOW_DEBUG` | — | Append click/collector debug lines to this file |
+
+## Open the board
+
+- Action **Open flow board** — floating overlay pane
+- Action **Open captain's deck** — full board in a dedicated `captain's deck`
+  workspace (created on first use, refocused afterwards)
+- Or bind keys in `~/.config/herdr/config.toml`
+
+Press `q` in the pane to exit.
+
+## Install / share
+
+```bash
+herdr plugin install Enk1do/captains-deck
+herdr plugin enable herdr-firstmate-flow
+```
+
+Local development:
+
+```bash
+herdr plugin link /path/to/herdr-firstmate-flow
+```
+
+Probe without a TTY (useful for CI or troubleshooting):
+
+```bash
+scripts/kanban-view.sh --homes        # list discovered homes
+scripts/kanban-view.sh --once         # one plain-text frame, all homes
+scripts/kanban-view.sh --once --home 2ndmate-demo
+```
+
+Herdr's plugin marketplace indexes public GitHub repositories tagged with the
+`herdr-plugin` topic, and this repository is listed there:
+<https://herdr.dev/plugins/>. Installation is still `herdr plugin install`.
