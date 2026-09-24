@@ -1,6 +1,6 @@
 # Captain's Deck
 
-Captain's Deck is a read-only **Firstmate flow** kanban plugin for [Herdr](https://herdr.dev).
+Captain's Deck is a read-only **[Firstmate flow](https://github.com/kunchenguid/firstmate)** kanban plugin for [Herdr](https://herdr.dev).
 
 Source: <https://github.com/Enk1do/captains-deck>
 
