@@ -2,6 +2,10 @@
 
 Captain's Deck is a read-only **[Firstmate flow](https://github.com/kunchenguid/firstmate)** kanban plugin for [Herdr](https://herdr.dev).
 
+![The Captain's Deck flow board in Herdr: crew tabs, five fixed columns, and ticket cards with live status badges](assets/captains-deck.png)
+
+![The Captain's Call decision dialog open over the board, with options, the recommended choice, a freeform note row, and Queue answer](assets/captains-call-decision-dialog.png)
+
 Source: <https://github.com/Enk1do/captains-deck>
 
 One board, every crew: the captain home plus each secondmate home appear as crew
