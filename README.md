@@ -140,8 +140,8 @@ whatever palette the Herdr `[theme]` setting gives the panes.
 
 ## Requirements
 
-- Herdr >= 0.9.0
-- Firstmate homes with `bin/fm-bearings-snapshot.sh`
+- [Herdr](https://herdr.dev/) >= 0.9.0
+- [Firstmate](https://github.com/kunchenguid/firstmate) homes with `bin/fm-bearings-snapshot.sh`
 - `python3` (standard library only), no `jq` required
 
 ## Home discovery
@@ -216,3 +216,15 @@ scripts/kanban-view.sh --once --home 2ndmate-demo
 Herdr's plugin marketplace indexes public GitHub repositories tagged with the
 `herdr-plugin` topic, and this repository is listed there:
 <https://herdr.dev/plugins/>. Installation is still `herdr plugin install`.
+
+## Related projects
+
+- [Herdr](https://herdr.dev/) — the terminal workspaces, panes, and agent host
+  this plugin extends through the plugin API.
+- [Herdr GPUI](https://github.com/penso/herdr-gpui) — the native Rust/GPUI
+  Herdr client the screenshots above were taken in.
+- [Firstmate](https://github.com/kunchenguid/firstmate) — the flow, bearings
+  snapshot, and Captain's Call keyed-answer intake this board projects.
+- [Pi](https://pi.dev/) — the agent harness running the crew agents in the
+  screenshots; each ticket shows whichever harness, model, and thinking effort
+  its home actually uses.
