@@ -15,14 +15,86 @@ Source: <https://github.com/deimantasnork/captains-deck>
 
 Parallel coding agents only feel like a crew when nothing important stalls in a forgotten tab.
 [Firstmate](https://github.com/kunchenguid/firstmate) runs that crew for you: isolated worktrees per task, supervision until the work is actually finished, and a clean handoff when the session is done.
-You are not on the hook to manually open pull requests, chase branch updates, resolve merge conflicts, or run end-to-end checks as a separate ritual—Firstmate's project modes (`no-mistakes`, `direct-PR`, `local-only`, and optional **`+yolo`** merge autonomy) prepare the PR, keep ship branches aligned with main, work through conflicts, and run the configured validation pipeline while the task closes.
-When policy allows yolo, landing can happen without you clicking merge.
 
-That automation still needs a captain for real decisions—and a place to notice when something is **blocked** or waiting on you.
-Firstmate exposes those moments as **Captain's Call** tickets; everything else should keep moving without interrupting your flow.
+Instead of repeatedly checking agents, opening pull requests, watching CI, rebasing branches, resolving merge-flow interruptions, and rerunning validation, Firstmate keeps the delivery loop moving for you.
 
-Captain's Deck is that bridge: a kanban board where you can **identify blocking and decision work at a glance**, answer Captain's Call in place (options, note, queue—then Firstmate resumes the lane), and jump to the live Herdr pane when you need eyes on the agent.
-The board stays read-only except those guarded keyed answers, so orchestration keeps running and you only touch what actually requires the captain.
+### Traditional workflow vs Firstmate
+
+| Traditional AI development | Firstmate + Captain's Deck |
+| --- | --- |
+| Create task | Create task |
+| Start agent | Agent starts in an isolated worktree |
+| Check progress manually | Firstmate supervises progress |
+| Check whether work finished | Completion is tracked automatically |
+| Commit + push | Handled as part of the workflow |
+| Open PR | PR prepared automatically |
+| Watch CI / validation | Validation pipeline is monitored |
+| Update / rebase branch | Ship branch stays aligned with `main` |
+| Resolve merge conflicts | Firstmate works through conflicts |
+| Re-run validation | Configured checks run as part of the flow |
+| Review + merge | Can land automatically when policy allows |
+| Repeat for every agent | Crew keeps moving in parallel |
+| **You operate the workflow** | **You handle the decisions that need you** |
+
+```text
+Traditional
+
+Task → Agent → Check → Push → PR → CI → Fix → Rebase → Test → Merge
+         ↑                         ↓
+         └──── human keeps coming back ────┘
+
+
+Firstmate + Captain's Deck
+
+Task → Agent → Worktree → PR → Validate → Land
+           │                         │
+           └────── Firstmate ────────┘
+                         │
+                  Human needed?
+                         │
+                  Captain's Call
+                         │
+                  Captain's Deck
+```
+
+Firstmate's project modes (`no-mistakes`, `direct-PR`, `local-only`, and optional **`+yolo`** merge autonomy) prepare the PR, keep ship branches aligned with `main`, work through conflicts, and run the configured validation pipeline while the task closes.
+When policy allows `+yolo`, landing can happen without you clicking merge.
+
+### What could that save?
+
+The estimates below are **preliminary directional estimates, not benchmark results**.
+They estimate **human orchestration overhead only**: checking agents, opening PRs, monitoring CI, updating branches, handling merge-flow interruptions, rerunning validation, and merging.
+They do not include the actual coding time performed by the agent.
+
+| Task effort | Traditional human touchpoints | With Firstmate | Potential actions removed | Estimated orchestration time saved |
+| --- | ---: | ---: | ---: | ---: |
+| **Small** — simple fix / small change | ~6–8 | ~1–3 | **4–6** | **~10–20 min** |
+| **Medium** — normal feature / multi-file change | ~10–14 | ~2–4 | **7–10** | **~30–60 min** |
+| **Large** — complex feature / migration / significant refactor | ~15–25 | ~3–6 | **10–20+** | **~1–2+ hours** |
+
+The advantage compounds when several agents work at the same time.
+For example, **five medium tasks** can create roughly **50–70 human coordination touchpoints** in a conventional workflow.
+With Firstmate handling the routine delivery loop, that could fall to roughly **10–20 meaningful human interactions**.
+
+> **Not necessarily less engineering work — dramatically less orchestration work.**
+
+### Where Captain's Deck fits
+
+Automation still needs a captain for real decisions.
+When something is **blocked**, ambiguous, or genuinely requires human judgment, Firstmate exposes it as a **Captain's Call**.
+Everything else should keep moving without interrupting your flow.
+
+Captain's Deck is that bridge: a kanban board where you can:
+
+- **see the whole crew at a glance**,
+- spot blocking work and Captain's Calls immediately,
+- answer a Captain's Call in place — choose an option, add a note, queue the answer, and let Firstmate resume the lane,
+- jump to the live Herdr pane when you actually need eyes on an agent,
+- and leave everything else running without babysitting terminals.
+
+The board stays read-only except for those guarded keyed answers, so orchestration keeps running and you only touch what actually requires the captain.
+
+**You steer the ship. Firstmate runs the crew. Captain's Deck shows you where your attention is actually needed.**
 
 ## The board
 
