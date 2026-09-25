@@ -109,6 +109,13 @@ Captain's Call answer (see below), where the captain's own decision goes to
 Firstmate's guarded keyed-answer intake, and the owning lane is steered so the
 answer is acted on.
 
+The fleet board folds a task that more than one home lists - a captain home
+mirrors delegated work as `<mate>/<task>` while the mate's own home keeps
+`<task>` - into the owning home's row, in the column that row reports, so one
+task is one card. Captain's Call rows already fold that way for answer routing;
+two same-named tasks in different repos (no matching namespace, run, or
+worktree) stay separate.
+
 | Column | Source |
 | --- | --- |
 | **Charted Next** | `gates` |
@@ -127,9 +134,9 @@ newest per home, gates/in-flight = 20). `FM_FLOW_ALL=1` requests every row.
 
 Crew tabs show a live activity dot (`●` working/blocked, `○` agent present) and
 the number of tickets on that board once it has been visited; a visited board
-with no tickets shows `(0)`. **All** shows the fleet-wide planned/running count
-(captain plus every secondmate); mate tabs count every column including Landed
-when that column is visible.
+with no tickets shows `(0)`. **All** shows the visible fleet-wide
+planned/running count after mirrored rows are folded; mate tabs count every
+column including Landed when that column is visible.
 
 ## What each ticket shows
 

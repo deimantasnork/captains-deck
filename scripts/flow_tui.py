@@ -283,9 +283,17 @@ def inject_all_crew(homes: list[Home]) -> list[Home]:
 
 
 def fleet_planned_running_count(
-    homes: list[Home], counts: dict[str, int], landed_counts: dict[str, int]
+    homes: list[Home],
+    counts: dict[str, int],
+    landed_counts: dict[str, int],
+    duplicates: int = 0,
 ) -> int | None:
-    """Tickets in Charted/Underway/Captain's Call/Awaiting Merge across the fleet."""
+    """Tickets in Charted/Underway/Captain's Call/Awaiting Merge across the fleet.
+
+    ``duplicates`` is the number of mirrored rows the fleet merge folded away
+    (a task listed by both its owning home and a parent home), so the All tab
+    count matches the rows the board actually shows.
+    """
     total = 0
     seen = False
     for home in real_homes(homes):
@@ -294,7 +302,7 @@ def fleet_planned_running_count(
             continue
         seen = True
         total += max(0, count - landed_counts.get(home.label, 0))
-    return total if seen else None
+    return max(0, total - duplicates) if seen else None
 
 
 def _pick_captains_call_duplicate(cards: list[Card]) -> Card:
@@ -323,13 +331,161 @@ def _dedupe_captains_call(cards: list[Card]) -> list[Card]:
     ]
 
 
+# Buckets the fleet merge folds duplicate rows in. Captain's Call is deduped
+# separately (its answer must route to exactly one home) and Landed rows stay
+# per-crew.
+FLEET_FOLDED_BUCKETS = ("charted", "underway", "awaiting_merge")
+
+
+def _owner_prefix(task_id: str) -> str:
+    """The mate namespace in a delegated task id (``mate/task``)."""
+    return task_id.split("/", 1)[0] if "/" in task_id else ""
+
+
+def _run_ref(doing: str) -> str:
+    """The Firstmate run id in a card's ``doing`` line, when it carries one."""
+    match = re.search(r"run:\s*(\S+)", doing or "")
+    return match.group(1) if match else ""
+
+
+def _same_path(a: str, b: str) -> bool:
+    return bool(a) and bool(b) and os.path.realpath(a) == os.path.realpath(b)
+
+
+def _is_owner_row(card: Card, homes: list[Home]) -> bool:
+    """Whether this row comes from the home its own task id points at."""
+    prefix = _owner_prefix(card.id)
+    if not prefix:
+        return True
+    owner = resolve_owner_home(homes, prefix, None)
+    return owner is not None and _same_path(owner.path, card.home_path)
+
+
+def _same_fleet_task(a: Card, b: Card, homes: list[Home]) -> bool:
+    """Whether two rows from different homes describe one Firstmate task.
+
+    A task can be listed twice in the fleet: the captain home mirrors work it
+    delegated as ``<mate>/<task>`` while the mate's own home keeps ``<task>``.
+    Beyond the shared task slug, only recognised evidence folds the rows: the
+    namespace resolving to the other row's home, a matching Firstmate run id,
+    or a matching worktree. Two same-named tasks in different repos stay apart.
+    """
+    if a.task != b.task:
+        return False
+    if _same_path(a.home_path, b.home_path):
+        return True
+    for card, other in ((a, b), (b, a)):
+        prefix = _owner_prefix(card.id)
+        if not prefix:
+            continue
+        owner = resolve_owner_home(homes, prefix, None)
+        if owner is not None and _same_path(owner.path, other.home_path):
+            return True
+    run_a, run_b = _run_ref(a.doing), _run_ref(b.doing)
+    if run_a and run_a == run_b:
+        return True
+    return bool(a.worktree) and bool(b.worktree) and _same_path(a.worktree, b.worktree)
+
+
+def _prefer_active_row(cards: list[Card], homes: list[Home]) -> Card:
+    """Pick the row that should represent a folded task on the fleet board.
+
+    The owning home's own row wins over the parent home's mirror; then the
+    further-along bucket; then the row with live agent evidence.
+    """
+
+    def depth_rank(card: Card) -> int:
+        return {"awaiting_merge": 2, "underway": 1}.get(card.bucket, 0)
+
+    def info_rank(card: Card) -> tuple:
+        return (
+            1 if card.live_status in ("working", "blocked") else 0,
+            1 if card.pane_id else 0,
+            1 if (card.run_elapsed or card.run_tokens) else 0,
+        )
+
+    return max(
+        cards,
+        key=lambda c: (
+            1 if _is_owner_row(c, homes) else 0,
+            depth_rank(c),
+            info_rank(c),
+        ),
+    )
+
+
+def _fold_duplicate_active_rows(
+    cols: dict[str, list[Card]], totals: dict[str, int], homes: list[Home]
+) -> None:
+    """Fold rows that describe one task into the owning home's row.
+
+    Firstmate's captain home lists delegated work as ``<mate>/<task>`` and the
+    mate's own home lists ``<task>``, so the unfiltered fleet merge showed the
+    same ticket twice. The kept row decides the column; ``totals`` drops the
+    folded rows so the All tab badge matches the board.
+    """
+    indexed = [
+        (bucket_key, card)
+        for bucket_key in FLEET_FOLDED_BUCKETS
+        for card in cols.get(bucket_key) or []
+    ]
+    if len(indexed) < 2:
+        return
+    by_task: dict[str, list[int]] = {}
+    for i, (_bucket_key, card) in enumerate(indexed):
+        by_task.setdefault(card.task, []).append(i)
+
+    dropped: set[int] = set()
+    for members in by_task.values():
+        if len(members) < 2:
+            continue
+        clusters: list[list[int]] = []
+        for i in members:
+            hits = [
+                cluster
+                for cluster in clusters
+                if any(
+                    _same_fleet_task(indexed[i][1], indexed[j][1], homes)
+                    for j in cluster
+                )
+            ]
+            if not hits:
+                clusters.append([i])
+                continue
+            merged = [i]
+            for cluster in hits:
+                merged.extend(cluster)
+                clusters.remove(cluster)
+            clusters.append(merged)
+        for cluster in clusters:
+            if len(cluster) < 2:
+                continue
+            keep = _prefer_active_row([indexed[i][1] for i in cluster], homes)
+            dropped.update(i for i in cluster if indexed[i][1] is not keep)
+
+    if not dropped:
+        return
+    for bucket_key in FLEET_FOLDED_BUCKETS:
+        kept = [
+            card
+            for i, (bucket, card) in enumerate(indexed)
+            if bucket == bucket_key and i not in dropped
+        ]
+        gone = len(cols.get(bucket_key) or []) - len(kept)
+        if not gone:
+            continue
+        cols[bucket_key] = kept
+        totals[bucket_key] = max(0, totals.get(bucket_key, len(kept)) - gone)
+
+
 def merge_fleet_columns(
     parts: list[tuple[Home, dict[str, list[Card]], dict[str, int]]],
 ) -> tuple[dict[str, list[Card]], dict[str, int]]:
     """Union every mate's active columns into one board (no Landed rows)."""
     cols: dict[str, list[Card]] = {key: [] for key, _ in COLUMNS}
     totals: dict[str, int] = {key: 0 for key, _ in COLUMNS}
-    order = {h.label: i for i, h in enumerate(real_homes([h for h, _, _ in parts]))}
+    fleet_homes = real_homes([h for h, _, _ in parts])
+    order = {h.label: i for i, h in enumerate(fleet_homes)}
 
     def sort_key(card: Card) -> tuple:
         label = next((h.label for h, _, _ in parts if h.path == card.home_path), "")
@@ -341,6 +497,8 @@ def merge_fleet_columns(
             cols[key].extend(bucket)
             totals[key] += home_totals.get(key, len(bucket))
         totals["landed"] += home_totals.get("landed", len(home_cols.get("landed") or []))
+
+    _fold_duplicate_active_rows(cols, totals, fleet_homes)
 
     for key in ACTIVE_BUCKETS:
         cols[key].sort(key=sort_key)
@@ -1749,6 +1907,7 @@ class Collector(threading.Thread):
         self._meta_at = 0.0
         self._counts: dict[str, int] = {}
         self._landed_counts: dict[str, int] = {}
+        self._fleet_dupes = 0
 
     # -- public API ---------------------------------------------------------
     def snapshot(self) -> Snapshot:
@@ -1872,9 +2031,12 @@ class Collector(threading.Thread):
                 parts.append((home, cols, totals))
                 self._record_home_counts(home, cols, totals)
         cols, totals = merge_fleet_columns(parts) if parts else ({k: [] for k, _ in COLUMNS}, {})
+        merged_active = sum(totals.get(bucket, 0) for bucket in ACTIVE_BUCKETS)
         fleet_total = fleet_planned_running_count(homes, self._counts, self._landed_counts)
         if fleet_total is not None:
-            self._counts[ALL_CREW_LABEL] = fleet_total
+            if parts:
+                self._fleet_dupes = max(0, fleet_total - merged_active)
+            self._counts[ALL_CREW_LABEL] = max(0, fleet_total - self._fleet_dupes)
         error = "; ".join(errors)
         self._publish(
             self._snapshot(
@@ -1995,7 +2157,10 @@ class Collector(threading.Thread):
                             cols, totals = {k: [] for k, _ in COLUMNS}, {}
                         self._record_home_counts(active, cols, totals)
                         fleet_total = fleet_planned_running_count(
-                            homes, self._counts, self._landed_counts
+                            homes,
+                            self._counts,
+                            self._landed_counts,
+                            self._fleet_dupes,
                         )
                         if fleet_total is not None:
                             self._counts[ALL_CREW_LABEL] = fleet_total
