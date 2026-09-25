@@ -4,9 +4,9 @@
 Shows every Firstmate home (captain + secondmates) as a crew tab, projected
 into five columns: Charted Next, Underway, Captain's Call, In Review, Landed.
 
-Per ticket it shows a live status badge, the title, an optional why row, the
-agent harness, model, and thinking effort, a totals row (total run time and
-tokens while the agent is working or blocked), and the worktree jump target.
+Per ticket it shows a live status badge (carrying total run time and tokens
+while the agent is working or blocked), the title, an optional why row, the
+agent harness, model, and thinking effort, and the worktree jump target.
 Clicking a ticket (or pressing Enter) focuses the Herdr pane where that
 ticket's agent runs, which selects it in the Herdr agents sidebar.
 
@@ -51,9 +51,9 @@ COLUMNS = [
 
 # One board card reserves a fixed vertical slot so wheel scrolling stays
 # smooth. The tallest card is CARD_MAX_H rows: two borders plus a badge, title,
-# optional why row, agent line, totals row, and jump target.
-CARD_SLOT_H = 9
-CARD_MAX_H = 8
+# optional why row, and one or two meta rows.
+CARD_SLOT_H = 8
+CARD_MAX_H = 7
 
 # The Lavish bearings board composes every open call into a card with ABOUT /
 # DECIDE context and authored options. The captain's deck mirrors that card in a
@@ -2781,16 +2781,12 @@ class UI:
             else ""
         )
         why = self.card_why_line(card)
-        agent_row, jump_row = self.card_meta_parts(card, crew)
-        run_row = self.card_run_line(card, inner)
         lines = [
             f"{fg(border_c)}{top}{RESET}",
             mid(self.card_badge_line(card, inner), card.badge_color),
             mid(card.title or card.task),
             *([mid(why, C_DIM)] if why else []),
-            *([mid(agent_row, C_DIM)] if agent_row else []),
-            *([mid(run_row, C_DIM)] if run_row else []),
-            *([mid(jump_row, C_DIM)] if jump_row else []),
+            *[mid(row, C_DIM) for row in self.card_meta_lines(card, crew, inner)],
             f"{fg(border_c)}{'\u2570' + '\u2500' * (cardw - 2) + '\u256f'}{RESET}",
         ]
         # pad each row to the full column width so the separator keeps a gap
@@ -2824,56 +2820,63 @@ class UI:
         return ""
 
     @staticmethod
-    def card_meta_parts(card: Card, crew: str = "") -> tuple[str, str]:
-        """(agent line, jump target) for the rows around the totals row.
+    def card_meta_lines(card: Card, crew: str = "", inner: int = 0) -> list[str]:
+        """Dim footer rows: harness/model/effort plus the jump target.
 
-        The totals row sits between them, so the two never merge; a card with
-        no agent yet shows the jump target alone instead of stacking a
-        placeholder on top of it.
+        One merged row (``claude\u00b7opus\u00b7xhigh \u00b7 \u2338 4/demo``) when it fits the
+        card, otherwise two rows so neither the harness nor the jump is lost.
         """
         footer = UI.card_footer_line(card, crew)
+        agent = UI.card_agent_line(card)
         has_agent = bool(card.agent or card.model or card.effort)
-        agent = UI.card_agent_line(card) if has_agent else ""
-        if not agent and not footer:
-            agent = UI.card_agent_line(card)
-        return agent, footer
+        if has_agent and footer:
+            merged = f"{agent} \u00b7 {footer}"
+            if not inner or display_width(merged) <= inner:
+                return [merged]
+            return [agent, footer]
+        return [footer or agent]
 
     @staticmethod
     def card_badge_line(card: Card, inner: int) -> str:
-        """Live status badge; run totals live on their own row below the agent."""
-        return clip(card.badge or "", inner)
+        """Live badge; live agents append totals, degrading to fit the card.
 
-    @staticmethod
-    def card_run_line(card: Card, inner: int = 0) -> str:
-        """Total wall time and total tokens, between the agent and jump rows.
-
-        Herdr-style ``9min 59s \u25cf 55.5k tok``; narrow cards drop to compact
-        time and then the unit so both totals stay readable.
+        Full form is ``shipping \u25cf 9min 59s \u25cf 55.5k tok``. Narrow cards shorten
+        the elapsed text, drop the unit, then let the state symbol carry the
+        word so both totals still show before the label alone is shown.
         """
         elapsed = getattr(card, "run_elapsed", "") or ""
         tokens = getattr(card, "run_tokens", "") or ""
         if card.live_status not in ("working", "blocked") or not (elapsed or tokens):
-            return ""
+            return clip(card.badge or "", inner)
+        label = badge_label_from_badge(card.badge or "shipping")
+        sym = (card.badge or "").strip().split(" ", 1)[0]
         pretty = _format_elapsed_deck(elapsed)
         short = _format_elapsed_short(elapsed)
         tok = _format_tokens_deck(tokens)
         tok_plain = tok[: -len(" tok")] if tok.endswith(" tok") else tok
         candidates: list[str] = []
         if pretty and tok:
-            candidates.append(f"{pretty} \u25cf {tok}")
+            candidates.append(f"{label} \u25cf {pretty} \u25cf {tok}")
         if short and tok:
-            candidates.append(f"{short} \u25cf {tok}")
+            candidates.append(f"{label} \u25cf {short} \u25cf {tok}")
         if short and tok_plain:
-            candidates.append(f"{short} \u25cf {tok_plain}")
-        candidates = [c for c in candidates if c]
-        if not candidates:
-            return ""
-        if inner:
-            for candidate in candidates:
-                if display_width(candidate) <= inner:
-                    return candidate
-            return clip(candidates[-1], inner)
-        return candidates[0]
+            candidates.append(f"{label} \u25cf {short} \u25cf {tok_plain}")
+            if (
+                sym
+                and not sym[0].isalnum()
+                and display_width(sym) <= 2
+                and display_width(f"{sym} {short} \u00b7 {tok_plain}") <= inner
+            ):
+                candidates.append(f"{sym} {short} \u00b7 {tok_plain}")
+        if short:
+            candidates.append(f"{label} \u25cf {short}")
+        if tok_plain:
+            candidates.append(f"{label} \u25cf {tok_plain}")
+        candidates.append(label)
+        for candidate in candidates:
+            if display_width(candidate) <= inner:
+                return candidate
+        return clip(candidates[-1], inner)
 
     @staticmethod
     def card_run_stats_suffix(card: Card) -> str:

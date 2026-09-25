@@ -62,14 +62,13 @@ def test_card_run_stats_suffix():
     assert suffix == "4min 2s \u25cf 12.1k tok"
 
 
-def test_card_badge_line_is_status_only():
+def test_card_badge_line_with_run_stats():
     card = flow.Card()
     card.badge = "\u25d0 validating"
     card.live_status = "working"
     card.run_elapsed = "9m 59s"
     card.run_tokens = "55.5k"
-    assert flow.UI.card_badge_line(card, 80) == "\u25d0 validating"
-    assert flow.UI.card_run_line(card, 80) == "9min 59s \u25cf 55.5k tok"
+    assert flow.UI.card_badge_line(card, 80) == "validating \u25cf 9min 59s \u25cf 55.5k tok"
 
 
 def test_card_badge_line_without_stats_uses_symbol_badge():
@@ -102,30 +101,34 @@ def test_pi_session_run_stats_sums_tokens():
         Path(path).unlink(missing_ok=True)
 
 
-def test_card_run_line_keeps_both_totals_at_deck_width():
+def test_card_badge_line_degrades_on_narrow_cards():
     card = flow.Card()
+    card.badge = "\u25cf shipping"
     card.live_status = "working"
     card.run_elapsed = "9m 59s"
     card.run_tokens = "55.5k"
-    assert flow.UI.card_run_line(card, 24) == "9min 59s \u25cf 55.5k tok"
+    assert flow.UI.card_badge_line(card, 31) == "shipping \u25cf 9min 59s \u25cf 55.5k tok"
+    assert flow.UI.card_badge_line(card, 24) == "shipping \u25cf 9m59s \u25cf 55.5k"
+    assert flow.UI.card_badge_line(card, 16) == "\u25cf 9m59s \u00b7 55.5k"
+    assert flow.UI.card_badge_line(card, 8) == "shipping"
 
 
-def test_card_run_line_degrades_on_narrow_cards():
+def test_card_badge_line_symbol_carries_long_labels():
     card = flow.Card()
-    card.live_status = "blocked"
-    card.run_elapsed = "1h 12m 5s"
-    card.run_tokens = "1.2M"
-    assert flow.UI.card_run_line(card, 24) == "1h 12min 5s \u25cf 1.2M tok"
-    assert flow.UI.card_run_line(card, 18) == "1h12m5s \u25cf 1.2M tok"
-    assert flow.UI.card_run_line(card, 15) == "1h12m5s \u25cf 1.2M"
-
-
-def test_card_run_line_hidden_when_agent_not_live():
-    card = flow.Card()
-    card.live_status = "idle"
+    card.badge = "\u25d0 validating"
+    card.live_status = "working"
     card.run_elapsed = "9m 59s"
     card.run_tokens = "55.5k"
-    assert flow.UI.card_run_line(card, 24) == ""
+    assert flow.UI.card_badge_line(card, 24) == "\u25d0 9m59s \u00b7 55.5k"
+
+
+def test_card_badge_line_blocked_keeps_word_at_deck_width():
+    card = flow.Card()
+    card.badge = "\u26d4 blocked"
+    card.live_status = "blocked"
+    card.run_elapsed = "18m 2s"
+    card.run_tokens = "220k"
+    assert flow.UI.card_badge_line(card, 24) == "blocked \u25cf 18m2s \u25cf 220k"
 
 
 def test_card_why_line_skips_badge_repeats_and_harness_noise():
@@ -154,19 +157,20 @@ def test_card_why_line_prefers_reason_then_blocked_by():
     assert flow.UI.card_why_line(card) == ""
 
 
-def test_card_meta_parts_splits_agent_and_jump():
+def test_card_meta_lines_merges_when_it_fits_and_splits_when_not():
     card = flow.Card()
     card.bucket = "underway"
     card.agent = "claude"
     card.model = "opus"
     card.effort = "xhigh"
     card.worktree = "/home/x/.treehouse/my-app/4/demo-issue-197"
-    assert flow.UI.card_meta_parts(card, "") == ("claude\u00b7opus\u00b7xhigh", "\u2338 4/demo-issue-197")
+    assert flow.UI.card_meta_lines(card, "", 40) == ["claude\u00b7opus\u00b7xhigh \u00b7 \u2338 4/demo-issue-197"]
+    assert flow.UI.card_meta_lines(card, "", 24) == ["claude\u00b7opus\u00b7xhigh", "\u2338 4/demo-issue-197"]
 
 
-def test_card_meta_parts_drops_placeholder_agent_when_jump_exists():
+def test_card_meta_lines_drops_placeholder_agent_when_footer_exists():
     card = flow.Card()
     card.bucket = "charted"
     card.worktree = ""
     card.agent = card.model = card.effort = ""
-    assert flow.UI.card_meta_parts(card, "") == ("", "no worktree yet")
+    assert flow.UI.card_meta_lines(card, "", 24) == ["no worktree yet"]

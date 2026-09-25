@@ -61,22 +61,22 @@ when that column is visible.
 
 ```text
 ╭─ demo-issue-197 ───────────────────╮
-│ shipping                           │   live status badge
+│ shipping ● 9min 59s ● 55.5k tok    │   live badge + run totals
 │ Add retry to the OAuth callback    │   title (or the "what" for landed)
 │ editing auth/client.rs             │   why: gate / decision / doing detail
-│ claude·opus·xhigh                  │   harness · model · thinking effort
-│ 9min 59s ● 55.5k tok               │   total wall time · total tokens
-│ ⌸ 4/my-app…                        │   worktree / PR jump target (crew on All)
+│ claude·opus·xhigh · ⌸ 4/my-app…    │   harness · model · effort · jump target
 ╰────────────────────╯
 ```
 
-The card reads top to bottom: id, live status, title, an optional why row, the
-agent line, the run totals, and the jump target. The totals row sits between
-the agent and the worktree — **total wall time since the task spawned** and
-**total tokens** (Herdr detection, or cumulative Pi session usage) — and appears
-while the agent is `shipping` or `blocked`. The why row shows a blocked-by, a
-gate reason, the Captain's Call prompt, or a `doing` detail that says more than
-the badge, and disappears when it would only repeat it.
+The card reads top to bottom: id, live badge, title, an optional why row, then
+the dim meta row. The badge carries **total wall time since the task spawned**
+and **total tokens** (Herdr detection, or cumulative Pi session usage) whenever
+the agent is `shipping` or `blocked`. The why row shows a blocked-by, a gate
+reason, the Captain's Call prompt, or a `doing` detail that says more than the
+badge, and disappears when it would only repeat it. The meta row merges the
+harness · model · thinking effort with the worktree/PR jump target (and the
+owning crew on **All**) when the card is wide enough, and splits into two rows
+when it is not.
 
 Badges: `● shipping`, `◐ validating`, `⛔ blocked`, `⚑ decision` /
 `⚑ captain`, `◍ awaits merge`, `⏸ parked` / `⏸ paused`, `⛔ failed`,
@@ -85,9 +85,14 @@ Live state comes from `herdr agent list`; activity and review state come from
 Firstmate's bearings snapshot and the home's `state/<task>.status` tail.
 Other states keep the symbolic badge only.
 
-A totals row shrinks with the card instead of clipping: full
-`9min 59s ● 55.5k tok`, then compact `9m59s ● 55.5k tok`, then
-`9m59s ● 55.5k`.
+A live badge row shrinks to fit its column instead of clipping the totals:
+
+| Card inner width | Badge row |
+| --- | --- |
+| ≥ 31 | `shipping ● 9min 59s ● 55.5k tok` |
+| ~24 | `shipping ● 9m59s ● 55.5k` |
+| ~16 | `◐ 9m59s · 55.5k` (state symbol replaces the word) |
+| tiny | `shipping` |
 
 ## Answering a Captain's Call ticket
 
