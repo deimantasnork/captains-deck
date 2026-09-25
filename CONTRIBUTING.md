@@ -2,12 +2,15 @@
 
 Thanks for wanting to help improve Captain's Deck.
 
+Captain's Deck exists so captains can see fleet-wide flow and unblock agents without tab-juggling—while [Firstmate](https://github.com/kunchenguid/firstmate) handles the heavy lifting of shipping finished work (PRs, branch sync, conflicts, validation, optional yolo merge).
+If you use this board in anger, your reports and PRs make that story clearer for everyone.
+
 Bug reports, feature ideas, and pull requests are welcome.
 You do not need maintainer access to participate.
 
 ## Report a problem or suggest a change
 
-Open a [new issue](https://github.com/Enk1do/captains-deck/issues/new) on GitHub.
+Open a [new issue](https://github.com/deimantasnork/captains-deck/issues/new) on GitHub.
 Use the templates when they fit, or choose **Open a blank issue** if none match.
 
 Please include:
@@ -19,7 +22,7 @@ Please include:
 
 ## Pull request workflow
 
-1. Fork [Enk1do/captains-deck](https://github.com/Enk1do/captains-deck) on GitHub.
+1. Fork [deimantasnork/captains-deck](https://github.com/deimantasnork/captains-deck) on GitHub.
 2. Clone your fork (or add it as a remote) and create a branch for your change.
 3. Install the plugin locally for manual testing:
 
@@ -51,4 +54,4 @@ Smaller, focused changes are easier to land than large rewrites.
 
 ## Questions
 
-Open a [GitHub issue](https://github.com/Enk1do/captains-deck/issues/new) with the **Question** template, or a blank issue if you prefer.
+Open a [GitHub issue](https://github.com/deimantasnork/captains-deck/issues/new) with the **Question** template, or a blank issue if you prefer.

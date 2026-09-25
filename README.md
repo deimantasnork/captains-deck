@@ -1,12 +1,30 @@
 # Captain's Deck
 
+**See the whole crew. Unblock what matters. Let Firstmate ship the rest.**
+
 Captain's Deck is a read-only **[Firstmate flow](https://github.com/kunchenguid/firstmate)** kanban plugin for [Herdr](https://herdr.dev).
+It is the captain's view of agent orchestration: small surface area, like [Pi](https://pi.dev/)—one board that does one job well instead of another dashboard to babysit.
 
 ![The Captain's Deck flow board in Herdr: crew tabs, five fixed columns, and ticket cards with live status badges](assets/captains-deck.png)
 
 ![The Captain's Call decision dialog open over the board, with options, the recommended choice, a freeform note row, and Queue answer](assets/captains-call-decision-dialog.png)
 
-Source: <https://github.com/Enk1do/captains-deck>
+Source: <https://github.com/deimantasnork/captains-deck>
+
+## Why Captain's Deck
+
+Parallel coding agents only feel like a crew when nothing important stalls in a forgotten tab.
+[Firstmate](https://github.com/kunchenguid/firstmate) runs that crew for you: isolated worktrees per task, supervision until the work is actually finished, and a clean handoff when the session is done.
+You are not on the hook to manually open pull requests, chase branch updates, resolve merge conflicts, or run end-to-end checks as a separate ritual—Firstmate's project modes (`no-mistakes`, `direct-PR`, `local-only`, and optional **`+yolo`** merge autonomy) prepare the PR, keep ship branches aligned with main, work through conflicts, and run the configured validation pipeline while the task closes.
+When policy allows yolo, landing can happen without you clicking merge.
+
+That automation still needs a captain for real decisions—and a place to notice when something is **blocked** or waiting on you.
+Firstmate exposes those moments as **Captain's Call** tickets; everything else should keep moving without interrupting your flow.
+
+Captain's Deck is that bridge: a kanban board where you can **identify blocking and decision work at a glance**, answer Captain's Call in place (options, note, queue—then Firstmate resumes the lane), and jump to the live Herdr pane when you need eyes on the agent.
+The board stays read-only except those guarded keyed answers, so orchestration keeps running and you only touch what actually requires the captain.
+
+## The board
 
 One board, every crew: an **All** tab (first in the row) merges every captain
 and secondmate home into one view — only work that is planned or still running
@@ -200,7 +218,7 @@ Press `q` in the pane to exit.
 ## Install / share
 
 ```bash
-herdr plugin install Enk1do/captains-deck
+herdr plugin install deimantasnork/captains-deck
 herdr plugin enable herdr-firstmate-flow
 ```
 
@@ -226,16 +244,16 @@ Herdr's plugin marketplace indexes public GitHub repositories tagged with the
 
 Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, conventions, and how to run the checks.
 
-Report bugs, ask questions, or suggest features with a [new GitHub issue](https://github.com/Enk1do/captains-deck/issues/new) (templates optional; blank issues are allowed).
+Report bugs, ask questions, or suggest features with a [new GitHub issue](https://github.com/deimantasnork/captains-deck/issues/new) (templates optional; blank issues are allowed).
 
 ## Related projects
 
-- [Herdr](https://herdr.dev/) — the terminal workspaces, panes, and agent host
-  this plugin extends through the plugin API.
-- [Herdr GPUI](https://github.com/penso/herdr-gpui) — the native Rust/GPUI
-  Herdr client the screenshots above were taken in.
-- [Firstmate](https://github.com/kunchenguid/firstmate) — the flow, bearings
-  snapshot, and Captain's Call keyed-answer intake this board projects.
-- [Pi](https://pi.dev/) — the agent harness running the crew agents in the
-  screenshots; each ticket shows whichever harness, model, and thinking effort
-  its home actually uses.
+- [Herdr](https://herdr.dev/) — terminal workspaces, panes, and the agent host
+  this plugin extends.
+- [Herdr GPUI](https://github.com/penso/herdr-gpui) — native Rust/GPUI Herdr
+  client used for the screenshots above.
+- [Firstmate](https://github.com/kunchenguid/firstmate) — agent distro that runs
+  the crew, closes worktrees into PRs (and optional yolo release), and owns the
+  bearings snapshot and Captain's Call intake this board projects.
+- [Pi](https://pi.dev/) — one of the supported primary harnesses; each ticket
+  shows whichever harness, model, and thinking effort that home actually uses.
