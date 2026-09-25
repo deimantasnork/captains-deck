@@ -158,6 +158,18 @@ def main() -> int:
         main_content = flow.decision_card_content(main_card, [main_home, mate_home], main_home)
         check(main_content["home_path"] == main_home.path, "(main) rows route to the active home")
 
+        # fleet All tab: (main) must not erase the snapshot home stamped on the card
+        all_home = flow.Home(flow.ALL_CREW_LABEL, "", "all")
+        fleet_card = make_card(owner="(main)")
+        fleet_card.home_path = mate_home.path
+        fleet_content = flow.decision_card_content(
+            fleet_card, flow.inject_all_crew([main_home, mate_home]), all_home
+        )
+        check(
+            fleet_content["home_path"] == mate_home.path,
+            "All tab falls back to the card's snapshot home for (main) rows",
+        )
+
         # an unresolved mate owner refuses rather than guessing a home
         lost = make_card(owner="vanished-mate")
         lost_content = flow.decision_card_content(lost, [main_home, mate_home], main_home)
