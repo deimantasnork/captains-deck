@@ -164,6 +164,83 @@ def show_landed_default() -> bool:
     return (val or "1").strip().lower() not in ("0", "false", "no", "off")
 
 
+def set_show_landed_pref(show: bool) -> None:
+    """Persist landed-column visibility for this and later board sessions."""
+    os.environ["FM_FLOW_SHOW_LANDED"] = "1" if show else "0"
+    path = os.path.join(_plugin_config_dir(), "show_landed")
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("1\n" if show else "0\n")
+    except OSError:
+        pass
+
+
+def board_ticket_count(cols: dict[str, list], totals: dict[str, int]) -> tuple[int, int]:
+    """Return (all tickets, landed-only) using bearings totals when present."""
+    landed = totals.get("landed", len(cols.get("landed") or []))
+    total = sum(totals.get(key, len(cols.get(key) or [])) for key, _ in COLUMNS)
+    return total, landed
+
+
+# Crew tab that merges every mate board (planned + running only; no Landed).
+ALL_CREW_LABEL = "All"
+ACTIVE_BUCKETS = tuple(key for key, _ in COLUMNS if key != "landed")
+
+
+def is_aggregate_home(home: Home | None) -> bool:
+    return home is not None and home.kind == "all"
+
+
+def real_homes(homes: list[Home]) -> list[Home]:
+    return [h for h in homes if not is_aggregate_home(h)]
+
+
+def inject_all_crew(homes: list[Home]) -> list[Home]:
+    if not homes or any(h.label == ALL_CREW_LABEL for h in homes):
+        return homes
+    return [Home(ALL_CREW_LABEL, "", "all")] + homes
+
+
+def fleet_planned_running_count(
+    homes: list[Home], counts: dict[str, int], landed_counts: dict[str, int]
+) -> int | None:
+    """Tickets in Charted/Underway/Captain's Call/Awaiting Merge across the fleet."""
+    total = 0
+    seen = False
+    for home in real_homes(homes):
+        count = counts.get(home.label)
+        if count is None:
+            continue
+        seen = True
+        total += max(0, count - landed_counts.get(home.label, 0))
+    return total if seen else None
+
+
+def merge_fleet_columns(
+    parts: list[tuple[Home, dict[str, list[Card]], dict[str, int]]],
+) -> tuple[dict[str, list[Card]], dict[str, int]]:
+    """Union every mate's active columns into one board (no Landed rows)."""
+    cols: dict[str, list[Card]] = {key: [] for key, _ in COLUMNS}
+    totals: dict[str, int] = {key: 0 for key, _ in COLUMNS}
+    order = {h.label: i for i, h in enumerate(real_homes([h for h, _, _ in parts]))}
+
+    def sort_key(card: Card) -> tuple:
+        label = next((h.label for h, _, _ in parts if h.path == card.home_path), "")
+        return (order.get(label, 99), card.task)
+
+    for home, home_cols, home_totals in parts:
+        for key in ACTIVE_BUCKETS:
+            bucket = list(home_cols.get(key) or [])
+            cols[key].extend(bucket)
+            totals[key] += home_totals.get(key, len(bucket))
+        totals["landed"] += home_totals.get("landed", len(home_cols.get("landed") or []))
+
+    for key in ACTIVE_BUCKETS:
+        cols[key].sort(key=sort_key)
+    return cols, totals
+
+
 # ----------------------------------------------------------------------------
 # home discovery
 # ----------------------------------------------------------------------------
@@ -350,6 +427,7 @@ def discover_homes(verbose: bool = False) -> list[Home]:
         add(path, require_assignment=real in treehouse_paths and real not in configured)
 
     homes.sort(key=lambda h: (h.kind != "captain", h.label))
+    homes = inject_all_crew(homes)
     if verbose:
         for h in homes:
             print(f"{h.label:32s} {h.path}  [{h.kind}]")
@@ -703,6 +781,22 @@ def resolve_owner_lane(homes: list[Home] | None, owner: str) -> tuple[Home | Non
     return None, ""
 
 
+def _decision_lookup_homes(
+    homes: list[Home] | None, owner_home: Home | None, active: Home | None
+) -> list[Home]:
+    """Homes to search for a composed Captain's Call card, owner first.
+
+    The /bearings lavish fleet board and its decision-card store live on the
+    captain home even when the call's backlog owner is a secondmate, so every
+    discovered home must be searched — not only the tab on screen.
+    """
+    ordered: list[Home] = []
+    for home in (owner_home, *((homes or [])), active):
+        if home is not None and all(home.path != h.path for h in ordered):
+            ordered.append(home)
+    return ordered
+
+
 def decision_card_content(
     card: Card, homes: list[Home] | None, active: Home | None
 ) -> dict:
@@ -714,7 +808,7 @@ def decision_card_content(
     call re-checked.
     """
     owner_home = resolve_owner_home(homes, card.owner, active)
-    raw = decision_card_for(card.task, owner_home, active)
+    raw = decision_card_for(card.task, *_decision_lookup_homes(homes, owner_home, active))
     ctype = (str(raw.get("type") or "decision").strip() or "decision")
     options: list[dict[str, str]] = []
     for opt in raw.get("options") or []:
@@ -1239,6 +1333,7 @@ class Snapshot:
         self.collected_at = 0.0
         self.homes: list[Home] = []
         self.counts: dict[str, int] = {}
+        self.landed_counts: dict[str, int] = {}
         self.totals: dict[str, int] = {}
         self.activity: dict[str, str] = {}
         self.loading = False
@@ -1272,6 +1367,7 @@ class Collector(threading.Thread):
         self._meta_index: dict[str, tuple[str, str]] = {}
         self._meta_at = 0.0
         self._counts: dict[str, int] = {}
+        self._landed_counts: dict[str, int] = {}
 
     # -- public API ---------------------------------------------------------
     def snapshot(self) -> Snapshot:
@@ -1316,7 +1412,101 @@ class Collector(threading.Thread):
             status = a.get("agent_status") or ""
             if live.get(cwd) != "working" or status == "blocked":
                 live[cwd] = status
-        return {h.label: live.get(os.path.realpath(h.path), "") for h in homes}
+        out = {
+            h.label: live.get(os.path.realpath(h.path), "")
+            for h in homes
+            if not is_aggregate_home(h)
+        }
+        if any(is_aggregate_home(h) for h in homes):
+            statuses = list(out.values())
+            agg = ""
+            if any(s == "working" for s in statuses):
+                agg = "working"
+            elif any(s == "blocked" for s in statuses):
+                agg = "blocked"
+            elif any(s for s in statuses):
+                agg = next(s for s in statuses if s)
+            out[ALL_CREW_LABEL] = agg
+        return out
+
+    def _bearings_stale(self, home: Home, now: float) -> bool:
+        raw, ts, raw_path = self._raw.get(home.label, ({}, 0.0, ""))
+        return (
+            self._force
+            or not raw
+            or raw_path != home.path
+            or now - ts > BEARINGS_TTL
+        )
+
+    def _load_bearings(
+        self,
+        home: Home,
+        now: float,
+        agents: dict[str, dict],
+        panes: dict[str, dict],
+        homes: list[Home],
+    ) -> tuple[dict, dict[str, list[Card]], dict[str, int], bool, str]:
+        """Return raw snapshot, cards, totals, loading flag, and error text."""
+        raw, ts, raw_path = self._raw.get(home.label, ({}, 0.0, ""))
+        stale = self._bearings_stale(home, now)
+        loading = False
+        if stale:
+            if not raw:
+                loading = True
+            data = bearings_snapshot(home)
+            if data:
+                raw, ts, raw_path = data, time.time(), home.path
+                self._raw[home.label] = (raw, ts, raw_path)
+                loading = False
+        if not raw:
+            return {}, {k: [] for k, _ in COLUMNS}, {}, loading, f"bearings snapshot failed for {home.path}"
+        cols, totals = make_cards(home, raw, self._meta_index, agents, panes, homes)
+        return raw, cols, totals, loading, ""
+
+    def _record_home_counts(self, home: Home, cols: dict[str, list[Card]], totals: dict[str, int]) -> None:
+        total, landed = board_ticket_count(cols, totals)
+        self._counts[home.label] = total
+        self._landed_counts[home.label] = landed
+
+    def _publish_fleet(
+        self,
+        homes: list[Home],
+        agents: dict[str, dict],
+        panes: dict[str, dict],
+        now: float,
+    ) -> None:
+        aggregate = next(h for h in homes if is_aggregate_home(h))
+        parts: list[tuple[Home, dict[str, list[Card]], dict[str, int]]] = []
+        loading = False
+        errors: list[str] = []
+        for home in real_homes(homes):
+            raw, cols, totals, home_loading, err = self._load_bearings(
+                home, now, agents, panes, homes
+            )
+            loading = loading or home_loading
+            if err:
+                errors.append(err)
+            if raw:
+                parts.append((home, cols, totals))
+                self._record_home_counts(home, cols, totals)
+        cols, totals = merge_fleet_columns(parts) if parts else ({k: [] for k, _ in COLUMNS}, {})
+        fleet_total = fleet_planned_running_count(homes, self._counts, self._landed_counts)
+        if fleet_total is not None:
+            self._counts[ALL_CREW_LABEL] = fleet_total
+        error = "; ".join(errors)
+        self._publish(
+            self._snapshot(
+                homes,
+                aggregate,
+                cols,
+                agents,
+                panes,
+                totals,
+                loading=loading and not parts,
+                error=error,
+            )
+        )
+        self._force = False
 
     def _snapshot(
         self,
@@ -1338,6 +1528,7 @@ class Collector(threading.Thread):
         snap.totals = totals or {}
         snap.activity = self._activity(homes, agents)
         snap.counts = dict(self._counts)
+        snap.landed_counts = dict(self._landed_counts)
         snap.collected_at = time.time()
         snap.loading = loading
         snap.error = error
@@ -1368,45 +1559,57 @@ class Collector(threading.Thread):
                         self._meta_at = now
                     _debug(f"iter: meta={len(self._meta_index)}")
 
-                    raw, ts, raw_path = self._raw.get(active.label, ({}, 0.0, ""))
-                    stale = (
-                        self._force
-                        or not raw
-                        or raw_path != active.path
-                        or now - ts > BEARINGS_TTL
-                    )
-                    if stale:
-                        # Paint cached cards (or a loading placeholder) first, so a
-                        # crew switch is instant even while bearings runs.
+                    if is_aggregate_home(active):
+                        _debug("iter: fleet board")
+                        self._publish_fleet(homes, agents, panes, now)
+                    else:
+                        raw, ts, raw_path = self._raw.get(active.label, ({}, 0.0, ""))
+                        stale = self._bearings_stale(active, now)
+                        if stale:
+                            if raw:
+                                cached, cached_totals = make_cards(
+                                    active, raw, self._meta_index, agents, panes, homes
+                                )
+                            else:
+                                cached, cached_totals = {k: [] for k, _ in COLUMNS}, {}
+                            _debug("iter: publish cached")
+                            self._publish(
+                                self._snapshot(
+                                    homes,
+                                    active,
+                                    cached,
+                                    agents,
+                                    panes,
+                                    cached_totals,
+                                    loading=not raw,
+                                )
+                            )
+                            _debug("iter: bearings begin")
+                            data = bearings_snapshot(active)
+                            _debug(f"iter: bearings done ok={bool(data)}")
+                            if data:
+                                raw, ts, raw_path = data, time.time(), active.path
+                                self._raw[active.label] = (raw, ts, raw_path)
+
+                        _debug("iter: make_cards")
                         if raw:
-                            cached, cached_totals = make_cards(
+                            cols, totals = make_cards(
                                 active, raw, self._meta_index, agents, panes, homes
                             )
                         else:
-                            cached, cached_totals = {k: [] for k, _ in COLUMNS}, {}
-                        _debug("iter: publish cached")
+                            cols, totals = {k: [] for k, _ in COLUMNS}, {}
+                        self._record_home_counts(active, cols, totals)
+                        fleet_total = fleet_planned_running_count(
+                            homes, self._counts, self._landed_counts
+                        )
+                        if fleet_total is not None:
+                            self._counts[ALL_CREW_LABEL] = fleet_total
+                        error = "" if raw else f"bearings snapshot failed for {active.path}"
+                        _debug("iter: publish final")
                         self._publish(
-                            self._snapshot(homes, active, cached, agents, panes, cached_totals, loading=not raw)
+                            self._snapshot(homes, active, cols, agents, panes, totals, error=error)
                         )
-                        _debug("iter: bearings begin")
-                        data = bearings_snapshot(active)
-                        _debug(f"iter: bearings done ok={bool(data)}")
-                        if data:
-                            raw, ts, raw_path = data, time.time(), active.path
-                            self._raw[active.label] = (raw, ts, raw_path)
-
-                    _debug("iter: make_cards")
-                    if raw:
-                        cols, totals = make_cards(
-                            active, raw, self._meta_index, agents, panes, homes
-                        )
-                    else:
-                        cols, totals = {k: [] for k, _ in COLUMNS}, {}
-                    self._counts[active.label] = sum(len(v) for v in cols.values())
-                    error = "" if raw else f"bearings snapshot failed for {active.path}"
-                    _debug("iter: publish final")
-                    self._publish(self._snapshot(homes, active, cols, agents, panes, totals, error=error))
-                    self._force = False
+                        self._force = False
             except Exception as exc:  # never kill the UI thread
                 _debug(f"iter: error {exc!r}")
                 snap = Snapshot()
@@ -1458,6 +1661,24 @@ def pad(text: str, width: int) -> str:
     return text + " " * max(0, width - display_width(text))
 
 
+def _wrap_long_token(token: str, width: int) -> list[str]:
+    """Split a single word across lines when it exceeds width."""
+    if display_width(token) <= width:
+        return [token]
+    parts: list[str] = []
+    cur = ""
+    for ch in token:
+        trial = cur + ch
+        if cur and display_width(trial) > width:
+            parts.append(cur)
+            cur = ch
+        else:
+            cur = trial
+    if cur:
+        parts.append(cur)
+    return parts or [""]
+
+
 def wrap_text(text: str, width: int) -> list[str]:
     """Greedy word wrap on terminal cells; never returns an empty list."""
     width = max(4, width)
@@ -1469,13 +1690,14 @@ def wrap_text(text: str, width: int) -> list[str]:
             continue
         cur = ""
         for word in words:
-            if not cur:
-                cur = word
-            elif display_width(cur) + 1 + display_width(word) <= width:
-                cur += " " + word
-            else:
-                lines.append(cur)
-                cur = word
+            for piece in _wrap_long_token(word, width):
+                if not cur:
+                    cur = piece
+                elif display_width(cur) + 1 + display_width(piece) <= width:
+                    cur += " " + piece
+                else:
+                    lines.append(cur)
+                    cur = piece
         if cur:
             lines.append(cur)
     return lines or [""]
@@ -1514,6 +1736,8 @@ class UI:
         self.dialog: DecisionDialog | None = None
         self.dialog_hit: list[tuple[int, int, int, str, int]] = []
         self.dialog_box: tuple[int, int, int, int] | None = None
+        self.dialog_scroll = 0
+        self._dialog_scroll_follow = False
 
     # -- helpers ------------------------------------------------------------
     def say(self, msg: str) -> None:
@@ -1527,9 +1751,28 @@ class UI:
     def toggle_landed(self) -> None:
         self.show_landed = not self.show_landed
         self.columns = [c for c in COLUMNS if self.show_landed or c[0] != "landed"]
-        self.col_idx = max(0, min(self.col_idx, len(self.columns) - 1))
+        if self.show_landed:
+            for i, (key, _) in enumerate(self.columns):
+                if key == "landed":
+                    self.col_idx = i
+                    self.card_idx = 0
+                    break
+        else:
+            self.col_idx = max(0, min(self.col_idx, len(self.columns) - 1))
+        set_show_landed_pref(self.show_landed)
         self.dirty = True
         self.say(f"landed column {'shown' if self.show_landed else 'hidden'}")
+
+    def crew_tab_count(self, snap: Snapshot, home_label: str) -> int | None:
+        if home_label == ALL_CREW_LABEL:
+            count = snap.counts.get(ALL_CREW_LABEL)
+            return count if count is not None else None
+        count = snap.counts.get(home_label)
+        if count is None:
+            return None
+        if self.show_landed:
+            return count
+        return max(0, count - snap.landed_counts.get(home_label, 0))
 
     def current_cards(self) -> list[Card]:
         snap = self.collector.snapshot()
@@ -1589,6 +1832,8 @@ class UI:
         self.dialog = DecisionDialog(content)
         self.dialog_hit = []
         self.dialog_box = None
+        self.dialog_scroll = 0
+        self._dialog_scroll_follow = False
         self.say(f"captain's call: {card.task}")
         self.dirty = True
 
@@ -1626,6 +1871,7 @@ class UI:
             return
         d.note += text
         d.focus = "note"
+        self._dialog_scroll_follow = True
         self.dirty = True
 
     def dialog_backspace(self) -> None:
@@ -1633,13 +1879,25 @@ class UI:
         if d is None:
             return
         d.note = d.note[:-1]
+        self._dialog_scroll_follow = True
+        self.dirty = True
+
+    def dialog_scroll_by(self, delta: int) -> None:
+        if self.dialog is None:
+            return
+        self.dialog_scroll = max(0, self.dialog_scroll + delta)
+        self._dialog_scroll_follow = False
         self.dirty = True
 
     def dialog_toggle_focus(self) -> None:
         d = self.dialog
         if d is None:
             return
-        d.focus = "options" if d.focus == "note" else "note"
+        if d.focus == "options":
+            d.focus = "note"
+            self._dialog_scroll_follow = True
+        else:
+            d.focus = "options"
         self.dirty = True
 
     def dialog_submit(self) -> None:
@@ -1682,7 +1940,11 @@ class UI:
         if d is None:
             return
         if button in (64, 65, 68, 69):
-            self.dialog_move(-1 if button in (64, 68) else 1)
+            delta = -WHEEL_ROWS if button in (64, 68) else WHEEL_ROWS
+            if self.dialog_scroll > 0 or getattr(self, "_dialog_scroll_max", 0) > 0:
+                self.dialog_scroll_by(delta)
+            else:
+                self.dialog_move(-1 if button in (64, 68) else 1)
             return
         for y1, x1, x2, kind, idx in self.dialog_hit:
             if y1 == y and x1 <= x < x2:
@@ -1692,6 +1954,7 @@ class UI:
                     self.dialog_submit()
                 elif kind == "note":
                     d.focus = "note"
+                    self._dialog_scroll_follow = True
                     self.dirty = True
                 return
         box = self.dialog_box
@@ -1813,7 +2076,7 @@ class UI:
             else:
                 dot_text, dot = "", ""
             dot_plain = display_width(dot_text)
-            count = snap.counts.get(home.label)
+            count = self.crew_tab_count(snap, home.label)
             # a known zero is a real answer ("no tickets"), so it shows (0); a
             # home never visited has no count yet and shows its bare name
             text = f"{home.label} ({count})" if count is not None else home.label
@@ -1833,7 +2096,7 @@ class UI:
 
         # column strip geometry (row-level scrolling: one card = 8 rows)
         gaps = len(self.columns) - 1
-        colw = max(14, (w - gaps) // max(1, len(self.columns)))
+        colw = max(10, (w - gaps) // max(1, len(self.columns)))
         self.colw = colw
         body_top = 4          # rows 0-3: header, rule, column titles, rule
         body_bottom = h - 2   # last row is the footer/help line
@@ -1894,7 +2157,7 @@ class UI:
                 if top > body_bottom or top + 6 < body_top:
                     continue
                 selected = ci == self.col_idx and i == self.card_idx
-                card_lines = self.render_card(card, colw, selected)
+                card_lines = self.render_card(card, colw, selected, snap)
                 for j, line in enumerate(card_lines):
                     y = top + j
                     if body_top <= y <= body_bottom:
@@ -1912,7 +2175,7 @@ class UI:
             lines.append("")
         help_line = (
             " \u2190\u2192 cols \u00b7 \u2191\u2193 cards \u00b7 pgup/pgdn or wheel scroll \u00b7 "
-            "click crew name \u00b7 enter/click decides \u00b7 o opens agent \u00b7 1-9/tab crew \u00b7 L landed \u00b7 r refresh \u00b7 q quit"
+            "click crew name \u00b7 enter/click decides \u00b7 o opens agent \u00b7 1-9/tab crew (All=fleet) \u00b7 L landed \u00b7 r refresh \u00b7 q quit"
         )
         lines.append(f"{fg(C_DIM)}{clip(help_line, w)}{RESET}")
         if self.flash and time.time() - self.flash_at < 6:
@@ -2102,15 +2365,14 @@ class UI:
             note_style = fg(note_border) + (BOLD if d.focus == "note" else "")
             card_top(note_style)
             kinds.append("note")
-            note = d.note if d.note else d.freeform_hint
-            card_row(
-                [
-                    ("\u203a ", fg(C_ACCENT if d.note else C_DIM)),
-                    (clip(note, cw - 2), "" if d.note else fg(C_DIM)),
-                ],
-                note_style,
-            )
-            kinds.append("note")
+            note_text = d.note if d.note else d.freeform_hint
+            note_lines = wrap_text(note_text, max(8, cw - 2))
+            for li, ln in enumerate(note_lines):
+                lead = "\u203a " if li == 0 else "  "
+                lead_style = fg(C_ACCENT if d.note else C_DIM) if li == 0 else ""
+                body_style = "" if d.note else fg(C_DIM)
+                card_row([(lead, lead_style), (ln, body_style)], note_style)
+                kinds.append("note")
             card_bottom(note_style)
             kinds.append("note")
 
@@ -2119,7 +2381,40 @@ class UI:
             for ln in wrap_text(d.error, inner):
                 add(ln, "error", C_BAD)
 
-        add("", "blank")
+        body_rows = list(rows)
+        body_kinds = list(kinds)
+        footer_rows: list[str] = []
+        footer_kinds: list[str] = []
+
+        def add_footer(
+            text: str,
+            kind: str,
+            color: int | None = None,
+            bold: bool = False,
+        ) -> None:
+            body = pad(text, inner)
+            styled = body
+            if color is not None:
+                styled = fg(color) + styled
+            if bold:
+                styled = BOLD + styled
+            if styled != body:
+                styled += RESET
+            footer_rows.append(styled)
+            footer_kinds.append(kind)
+
+        def add_footer_segments(segments: list[tuple[str, str]], kind: str) -> None:
+            used = 0
+            styled = ""
+            for text, style in segments:
+                if not text:
+                    continue
+                used += display_width(text)
+                styled += f"{style}{text}{RESET}" if style else text
+            footer_rows.append(styled + " " * max(0, inner - used))
+            footer_kinds.append(kind)
+
+        add_footer("", "blank")
         status = "queueing\u2026" if d.busy else ("\u2713 queued" if d.queued else "")
         button_segments = [
             (" Queue answer ", REV + BOLD + fg(C_OK if d.queued else C_ACCENT))
@@ -2129,26 +2424,36 @@ class UI:
             button_segments.append(
                 (f" {status} ", REV + fg(C_OK) if d.queued else fg(C_WARN))
             )
-        add_segments(button_segments, "button")
-        add("esc close \u00b7 \u2191\u2193 move \u00b7 space pick \u00b7 enter queue", "help", C_DIM)
+        add_footer_segments(button_segments, "button")
+        help_bits = [
+            "esc close",
+            "\u2191\u2193 move",
+            "space pick",
+            "enter queue",
+        ]
+        # Keep Queue answer + help visible; scroll only the card body above them.
+        # The whole modal must fit in the terminal (borders add two rows).
+        max_inner_rows = max(6, h - 2)
+        budget = max(4, max_inner_rows - len(footer_rows) - 1)
+        scroll_max = max(0, len(body_rows) - budget)
+        self._dialog_scroll_max = scroll_max
+        if scroll_max:
+            help_bits.insert(1, "pgup/pgdn or wheel scroll")
+        if self._dialog_scroll_follow and d.focus == "note":
+            self.dialog_scroll = scroll_max
+            self._dialog_scroll_follow = False
+        self.dialog_scroll = min(max(0, self.dialog_scroll), scroll_max)
+        if scroll_max:
+            top = self.dialog_scroll + 1
+            bottom = min(len(body_rows), self.dialog_scroll + budget)
+            help_bits.insert(0, f"lines {top}-{bottom} of {len(body_rows)}")
+        add_footer(" \u00b7 ".join(help_bits), "help", C_DIM)
 
-        # keep the box on screen: shed hint/context rows before clipping, and
-        # always keep the action and help rows at the bottom
-        budget = max(6, h - 3)
-        while len(rows) > budget:
-            for pref in ("hint", "ctx", "blank"):
-                drop = next(
-                    (i for i in range(len(rows) - 1, -1, -1) if kinds[i] == pref),
-                    None,
-                )
-                if drop is not None:
-                    del rows[drop]
-                    del kinds[drop]
-                    break
-            else:
-                keep_head = max(1, budget - 6)
-                rows = rows[:keep_head] + ["\u2026"] + rows[-(budget - keep_head - 1):]
-                kinds = kinds[:keep_head] + ["ellipsis"] + kinds[-(budget - keep_head - 1):]
+        if scroll_max:
+            body_rows = body_rows[self.dialog_scroll : self.dialog_scroll + budget]
+            body_kinds = body_kinds[self.dialog_scroll : self.dialog_scroll + budget]
+        rows = body_rows + footer_rows
+        kinds = body_kinds + footer_kinds
 
         box_h = len(rows) + 2
         y0 = max(0, min(max(0, h - box_h - 1), (h - box_h) // 2))
@@ -2180,7 +2485,16 @@ class UI:
             elif kind == "note":
                 self.dialog_hit.append((y, x0, x0 + dw, "note", 0))
 
-    def render_card(self, card: Card, colw: int, selected: bool) -> list[str]:
+    def _crew_label(self, snap: Snapshot, home_path: str) -> str:
+        if not home_path:
+            return ""
+        target = os.path.realpath(home_path)
+        for home in snap.homes:
+            if home.path and os.path.realpath(home.path) == target:
+                return home.label
+        return os.path.basename(home_path) or home_path
+
+    def render_card(self, card: Card, colw: int, selected: bool, snap: Snapshot | None = None) -> list[str]:
         border_c = C_TITLE if selected else C_BORDER
         cardw = max(10, colw - 1)  # one column of breathing room between cards
         inner = max(4, cardw - 4)
@@ -2207,7 +2521,15 @@ class UI:
             mid(self.card_agent_line(card), C_DIM),
             mid(card.title or card.task),
             mid(card.doing, C_WARN),
-            mid(self.card_footer_line(card), C_DIM),
+            mid(
+                self.card_footer_line(
+                    card,
+                    self._crew_label(snap, card.home_path)
+                    if snap is not None and snap.home is not None and is_aggregate_home(snap.home)
+                    else "",
+                ),
+                C_DIM,
+            ),
             f"{fg(border_c)}{'\u2570' + '\u2500' * (cardw - 2) + '\u256f'}{RESET}",
         ]
         # pad each row to the full column width so the separator keeps a gap
@@ -2219,16 +2541,19 @@ class UI:
         return "\u00b7".join(parts) if parts else "no agent yet"
 
     @staticmethod
-    def card_footer_line(card: Card) -> str:
+    def card_footer_line(card: Card, crew: str = "") -> str:
+        crew_bit = f"\u2316 {crew} \u00b7 " if crew else ""
         if card.bucket == "landed" and card.artifact:
             art = card.artifact.rstrip("/").split("/")[-1]
-            return f"\u2197 {art}"
+            return f"{crew_bit}\u2197 {art}"
         if card.worktree:
             parts = card.worktree.rstrip("/").split("/")
             short = "/".join(parts[-2:])
-            return f"\u2338 {short}"
+            return f"{crew_bit}\u2338 {short}"
         if card.bucket == "charted":
-            return "no worktree yet"
+            return f"{crew_bit}no worktree yet" if crew else "no worktree yet"
+        if crew:
+            return crew_bit.rstrip(" \u00b7 ")
         return card.mode or card.kind or ""
 
 
@@ -2276,6 +2601,15 @@ def parse_input(buf: bytes, ui: UI) -> bytes:
                 ui.dirty = True
             continue
         if buf.startswith(b"\x1b["):
+            km = re.match(rb"\x1b\[(\d+);(\d+)u", buf)
+            if km:
+                cp, mod = _int(km.group(1)), _int(km.group(2))
+                buf = buf[km.end() :]
+                ui.dirty = True
+                # Kitty keyboard protocol: shift+L toggles Landed (lowercase l is column right)
+                if cp in (76, 108) and (mod & 1):
+                    ui.toggle_landed()
+                continue
             m = re.match(rb"\x1b\[([0-9]*)([ABCDZHF~])", buf)
             if not m:
                 if len(buf) < 8:
@@ -2292,6 +2626,10 @@ def parse_input(buf: bytes, ui: UI) -> bytes:
                     ui.dialog_move(1)
                 elif code == b"Z":
                     ui.dialog_toggle_focus()
+                elif code == b"~" and num == b"5":
+                    ui.dialog_scroll_by(-max(1, ui.body_h // 3))
+                elif code == b"~" and num == b"6":
+                    ui.dialog_scroll_by(max(1, ui.body_h // 3))
                 continue
             if code == b"A":
                 ui.card_idx = max(0, ui.card_idx - 1)
@@ -2338,6 +2676,9 @@ def parse_input(buf: bytes, ui: UI) -> bytes:
         except UnicodeDecodeError:
             continue
         ui.dirty = True
+        if text == "\x0c":  # ctrl+L toggles Landed when the terminal sends it
+            ui.toggle_landed()
+            continue
         if ui.dialog is not None:
             # the modal owns the keyboard: Esc closes, arrows/space choose,
             # every printable key edits the note
@@ -2349,6 +2690,7 @@ def parse_input(buf: bytes, ui: UI) -> bytes:
                 ui.dialog_backspace()
             elif text == "\x15":  # ctrl+u clears the note
                 ui.dialog.note = ""
+                ui._dialog_scroll_follow = True
                 ui.dirty = True
             elif text == "\t":
                 ui.dialog_toggle_focus()

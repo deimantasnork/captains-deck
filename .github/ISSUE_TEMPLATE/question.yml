@@ -1,0 +1,17 @@
+name: Question
+description: Ask how Captain's Deck, Firstmate, or Herdr fit together
+title: "[Question]: "
+labels:
+  - question
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Setup (homes, backends, OS) and what you already tried.
