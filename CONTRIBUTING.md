@@ -35,6 +35,8 @@ Please include:
 
    ```sh
    python3 tests/test_flow_decision_dialog.py
+   python3 tests/test_open_scripts.py
+   python3 tests/test_flow_homes.py
    python3 -m pytest tests/ -q
    python3 scripts/fm_contract_check.py --home tests/fixtures/home
    ```

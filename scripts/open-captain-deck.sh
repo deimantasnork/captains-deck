@@ -1,35 +1,18 @@
 #!/usr/bin/env bash
 # Open the read-only Flow board full-pane in a dedicated "captain's deck" workspace.
+#
+# Only a pane this plugin can prove is its own is focused, adopted or retired:
+# its id is in the deck record, or its foreground process is the board itself.
+# A user pane that merely shares the "Flow" label is never closed.
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=fm-pane-record.sh
+. "$SCRIPT_DIR/fm-pane-record.sh"
 
 herdr_bin="${HERDR_BIN_PATH:-herdr}"
 label="captain's deck"
-
-# `alive` when the pane's foreground process is the board TUI, `stale` when the
-# pane still carries the Flow label but its process exited (pressing `q` quits
-# the board and leaves the pane at a shell prompt).
-board_state() {
-  "$herdr_bin" pane process-info --pane "$1" 2>/dev/null | python3 -c '
-import json, sys
-try:
-    data = json.load(sys.stdin)
-except Exception:
-    print("unknown")
-    sys.exit(0)
-res = data.get("result", data)
-info = res.get("process_info", {}) if isinstance(res, dict) else {}
-procs = info.get("foreground_processes")
-if not isinstance(procs, list):
-    print("unknown")
-    sys.exit(0)
-for p in procs:
-    argv = " ".join(p.get("argv") or []) if isinstance(p, dict) else ""
-    if "flow_tui.py" in argv or "kanban-view.sh" in argv:
-        print("alive")
-        sys.exit(0)
-print("stale")
-' 2>/dev/null || echo unknown
-}
+record="$(fm_record_file deck-flow.panes)"
 
 flow_pane_of() {
   "$herdr_bin" pane list --workspace "$1" 2>/dev/null | python3 -c '
@@ -63,7 +46,8 @@ for w in res.get("workspaces", []) if isinstance(res, dict) else []:
 ' "$label" 2>/dev/null || true)"
 
 # Prefer a deck whose board is already running. Remember the first deck and the
-# first stale board so they can be repaired instead of duplicated.
+# first stale board - stale only when the pane is ours and its process is gone -
+# so they can be repaired instead of duplicated.
 ws_id=""
 flow_pane=""
 flow_tab=""
@@ -77,9 +61,19 @@ while IFS= read -r candidate; do
   pane="$(printf '%s' "$row" | cut -f1)"
   tab="$(printf '%s' "$row" | cut -f2)"
   [ -n "$pane" ] || continue
-  state="$(board_state "$pane")"
-  if [ "$state" != "stale" ]; then
-    # alive (or unprobeable, so never destroyed) wins
+  mine=0
+  if fm_pane_recorded "$record" "$pane"; then
+    mine=1
+  elif fm_pane_is_board "$herdr_bin" "$pane"; then
+    mine=1
+    fm_pane_record "$record" "$pane"
+  fi
+  # A "Flow" pane that is neither recorded nor the board is someone else's.
+  [ "$mine" = "1" ] || continue
+  state=2
+  fm_pane_is_board "$herdr_bin" "$pane" || state=$?
+  if [ "$state" != "1" ]; then
+    # alive - or unprobeable, which is never destroyed - wins
     ws_id="$candidate"
     flow_pane="$pane"
     flow_tab="$tab"
@@ -124,14 +118,23 @@ if [ -n "$flow_pane" ]; then
   exec "$herdr_bin" plugin pane focus "$flow_pane"
 fi
 
-# No live board: open a fresh one first, then retire a stale "Flow" pane, so
-# the workspace is never left empty and the fresh board cannot fail silently.
+# No live board: open a fresh one first, then retire a stale pane this plugin
+# recorded, so the workspace is never left empty and the fresh board cannot
+# fail silently. An unrecorded stale pane is left alone.
+before="$("$herdr_bin" pane list 2>/dev/null | fm_pane_ids | sort)"
 "$herdr_bin" plugin pane open \
   --plugin herdr-firstmate-flow \
   --entrypoint flow \
   --placement tab \
   --workspace "$ws_id" \
   --focus
+after="$("$herdr_bin" pane list 2>/dev/null | fm_pane_ids | sort)"
+new_pane="$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after") | grep -m1 . || true)"
+if [ -n "$new_pane" ]; then
+  fm_pane_record "$record" "$new_pane"
+fi
 if [ -n "$stale_pane" ]; then
   "$herdr_bin" pane close "$stale_pane" >/dev/null 2>&1 || true
+  fm_pane_forget "$record" "$stale_pane"
 fi
+exit 0
