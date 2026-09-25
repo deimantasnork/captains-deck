@@ -38,7 +38,7 @@ Firstmate's guarded keyed-answer intake.
 | Column | Source |
 | --- | --- |
 | **Charted Next** | `gates` |
-| **Underway** | every `in_flight` row (badges carry `working` / `validating` / `parked` / `paused` / `failed`) |
+| **Underway** | every `in_flight` row (badges carry `shipping` / `validating` / `parked` / `paused` / `failed`) |
 | **Captain's Call** | `decisions_open` - click a ticket to decide it in place |
 | **Awaiting Merge** | `in_flight` rows whose Firstmate `state` is `done` (crew finished, waiting on merge/review) |
 | **Landed** | `landed` — Firstmate's "Recently Landed": merged PRs, completed scouts, local-only merges (hidden by default here; toggle with `L`) |
@@ -61,24 +61,33 @@ when that column is visible.
 
 ```text
 ╭─ demo-issue-197 ───────────────────╮
-│ ◐ validating       │   live badge
-│ claude·opus·xhigh  │   harness · model · thinking effort
-│ Add retry to the…  │   title / summary / landed what
-│ Validating (9m 59s │   doing/status + total run time · tokens
-│  · ↓ 55.5k tokens) │
-│ ⌸ 4/my-app-feat…   │   worktree (or ↗ PR artifact for landed)
+│ shipping                           │   live status badge
+│ Add retry to the OAuth callback    │   title (or the "what" for landed)
+│ editing auth/client.rs             │   why: gate / decision / doing detail
+│ claude·opus·xhigh                  │   harness · model · thinking effort
+│ 9min 59s ● 55.5k tok               │   total wall time · total tokens
+│ ⌸ 4/my-app…                        │   worktree / PR jump target (crew on All)
 ╰────────────────────╯
 ```
 
-Badges: `● working`, `◐ validating`, `⛔ blocked`, `⚑ decision` /
+The card reads top to bottom: id, live status, title, an optional why row, the
+agent line, the run totals, and the jump target. The totals row sits between
+the agent and the worktree — **total wall time since the task spawned** and
+**total tokens** (Herdr detection, or cumulative Pi session usage) — and appears
+while the agent is `shipping` or `blocked`. The why row shows a blocked-by, a
+gate reason, the Captain's Call prompt, or a `doing` detail that says more than
+the badge, and disappears when it would only repeat it.
+
+Badges: `● shipping`, `◐ validating`, `⛔ blocked`, `⚑ decision` /
 `⚑ captain`, `◍ awaits merge`, `⏸ parked` / `⏸ paused`, `⛔ failed`,
 `✓ done` / `✓ landed`, `· queued`.
 Live state comes from `herdr agent list`; activity and review state come from
 Firstmate's bearings snapshot and the home's `state/<task>.status` tail.
-While an agent is **working** or **blocked**, the **doing/status** line appends
-total run time and token use in the same style as Herdr's agent sidebar
-(wall time since task spawn when available; tokens from detection or cumulative
-Pi session usage).
+Other states keep the symbolic badge only.
+
+A totals row shrinks with the card instead of clipping: full
+`9min 59s ● 55.5k tok`, then compact `9m59s ● 55.5k tok`, then
+`9m59s ● 55.5k`.
 
 ## Answering a Captain's Call ticket
 

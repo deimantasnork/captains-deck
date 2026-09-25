@@ -4,9 +4,11 @@
 Shows every Firstmate home (captain + secondmates) as a crew tab, projected
 into five columns: Charted Next, Underway, Captain's Call, In Review, Landed.
 
-Per ticket it shows a live status badge, the agent harness, model,
-thinking effort, and (on click / Enter) focuses the Herdr pane where that ticket's
-agent runs, which selects it in the Herdr agents sidebar.
+Per ticket it shows a live status badge, the title, an optional why row, the
+agent harness, model, and thinking effort, a totals row (total run time and
+tokens while the agent is working or blocked), and the worktree jump target.
+Clicking a ticket (or pressing Enter) focuses the Herdr pane where that
+ticket's agent runs, which selects it in the Herdr agents sidebar.
 
 Captain's Call is the one column that acts: clicking (or pressing Enter on) a
 ticket opens its composed board card as a decision dialog, and the captain's
@@ -46,6 +48,12 @@ COLUMNS = [
     ("awaiting_merge", "Awaiting Merge"),
     ("landed", "Landed"),
 ]
+
+# One board card reserves a fixed vertical slot so wheel scrolling stays
+# smooth. The tallest card is CARD_MAX_H rows: two borders plus a badge, title,
+# optional why row, agent line, totals row, and jump target.
+CARD_SLOT_H = 9
+CARD_MAX_H = 8
 
 # The Lavish bearings board composes every open call into a card with ABOUT /
 # DECIDE context and authored options. The captain's deck mirrors that card in a
@@ -533,7 +541,10 @@ _SESSION_TAIL_BYTES = 512_000
 
 
 def _format_elapsed(seconds: float) -> str:
-    s = int(max(0, seconds))
+    try:
+        s = int(max(0, seconds))
+    except (TypeError, ValueError):
+        return ""
     if s >= 3600:
         h, rem = divmod(s, 3600)
         m, sec = divmod(rem, 60)
@@ -554,6 +565,36 @@ def _format_token_count(total: int) -> str:
     else:
         return str(total)
     return text.replace(".0M", "M").replace(".0k", "k")
+
+
+def _format_elapsed_deck(elapsed: str) -> str:
+    """Deck badge row: ``3m 45s`` → ``3min 45s``."""
+    if not elapsed:
+        return ""
+    return re.sub(r"(\d+)m\b", r"\1min", elapsed.strip())
+
+
+def _format_elapsed_short(elapsed: str) -> str:
+    """Deck badge row, tight widths: ``9m 59s`` → ``9m59s``."""
+    return re.sub(r"\s+", "", (elapsed or "").strip())
+
+
+def _format_tokens_deck(tokens: str) -> str:
+    """Deck badge row: ``75k`` → ``75k tok``."""
+    if not tokens:
+        return ""
+    t = tokens.strip()
+    if t.lower().endswith(" tok"):
+        return t
+    return f"{t} tok"
+
+
+def badge_label_from_badge(badge: str) -> str:
+    """Human label from a badge like ``◐ validating`` → ``validating``."""
+    s = (badge or "").strip()
+    if " " in s:
+        return s.split(None, 1)[1].lower()
+    return s.lower()
 
 
 def _normalize_token_display(raw: str) -> str:
@@ -1460,7 +1501,7 @@ def make_cards(
             elif "validating" in doing:
                 card.badge, card.badge_color = "\u25d0 validating", C_WARN
             elif card.live_status == "working" or "harness busy" in doing:
-                card.badge, card.badge_color = "\u25cf working", C_OK
+                card.badge, card.badge_color = "\u25cf shipping", C_OK
             elif state == "done":
                 card.badge, card.badge_color = "\u25cd awaits merge", C_REVIEW
             elif state == "parked":
@@ -1478,7 +1519,7 @@ def make_cards(
         if card.bucket == "charted" and card.live_status in ("working", "blocked"):
             card.bucket = "underway"
             card.badge, card.badge_color = (
-                ("\u26d4 blocked", C_BAD) if card.live_status == "blocked" else ("\u25cf working", C_OK)
+                ("\u26d4 blocked", C_BAD) if card.live_status == "blocked" else ("\u25cf shipping", C_OK)
             )
 
     for entry in snap.get("gates") or []:
@@ -2311,7 +2352,7 @@ class UI:
 
         lines.append(f"{fg(C_BORDER)}{'\u2500' * w}{RESET}")
 
-        # column strip geometry (row-level scrolling: one card = 8 rows)
+        # column strip geometry (row-level scrolling: one card = CARD_SLOT_H rows)
         gaps = len(self.columns) - 1
         colw = max(10, (w - gaps) // max(1, len(self.columns)))
         self.colw = colw
@@ -2327,22 +2368,22 @@ class UI:
         # clamp every column's row offset, then keep the selection visible
         for ckey, _ in self.columns:
             cards = snap.cols.get(ckey) or []
-            max_off = max(0, len(cards) * 8 - body_h)
+            max_off = max(0, len(cards) * CARD_SLOT_H - body_h)
             self.scroll[ckey] = min(max(0, self.scroll.get(ckey, 0)), max_off)
         key = self.current_key()
         cards_sel = snap.cols.get(key) or []
         if cards_sel:
             self.card_idx = min(self.card_idx, len(cards_sel) - 1)
             off = self.scroll.get(key, 0)
-            top = self.card_idx * 8
-            bottom = top + 6
+            top = self.card_idx * CARD_SLOT_H
+            bottom = top + CARD_MAX_H
             # only move the viewport when the selected card is fully hidden;
             # a partially clipped card is still visible (smooth scrolling)
             if bottom < off:
                 off = top
             elif top > off + body_h - 1:
                 off = bottom - body_h + 1
-            max_off = max(0, len(cards_sel) * 8 - body_h)
+            max_off = max(0, len(cards_sel) * CARD_SLOT_H - body_h)
             self.scroll[key] = min(max(0, off), max_off)
         else:
             self.card_idx = 0
@@ -2358,8 +2399,8 @@ class UI:
         lines.append(f"{fg(C_BORDER)}\u2502{RESET}".join(header_cells))
         lines.append(f"{fg(C_BORDER)}{'\u2500' * w}{RESET}")
 
-        # cards grid: each column is a stack of 8-row card slots, scrolled by rows
-        # so a wheel notch moves the content smoothly instead of by whole cards
+        # cards grid: each column is a stack of CARD_SLOT_H-row card slots,
+        # scrolled by rows so a wheel notch moves the content smoothly
         grid: list[list[str]] = []
         for ci, (ckey, _) in enumerate(self.columns):
             cards = snap.cols.get(ckey) or []
@@ -2370,8 +2411,8 @@ class UI:
                 placeholder = "  (loading\u2026)" if snap.loading else "  (empty)"
                 col_lines[0] = f"{fg(C_DIM)}{pad(placeholder, colw)}{RESET}"
             for i, card in enumerate(cards):
-                top = body_top + i * 8 - off
-                if top > body_bottom or top + 6 < body_top:
+                top = body_top + i * CARD_SLOT_H - off
+                if top > body_bottom or top + CARD_MAX_H - 1 < body_top:
                     continue
                 selected = ci == self.col_idx and i == self.card_idx
                 card_lines = self.render_card(card, colw, selected, snap)
@@ -2380,7 +2421,13 @@ class UI:
                     if body_top <= y <= body_bottom:
                         col_lines[y - body_top] = line
                 self.card_regions.append(
-                    (x0, max(body_top, top), x0 + colw, min(body_bottom, top + 6) + 1, card)
+                    (
+                        x0,
+                        max(body_top, top),
+                        x0 + colw,
+                        min(body_bottom, top + len(card_lines) - 1) + 1,
+                        card,
+                    )
                 )
             grid.append(col_lines)
 
@@ -2728,21 +2775,22 @@ class UI:
                 body = f"{fg(color)}{body}{RESET}"
             return f"\u2502 {body} \u2502"
 
+        crew = (
+            self._crew_label(snap, card.home_path)
+            if snap is not None and snap.home is not None and is_aggregate_home(snap.home)
+            else ""
+        )
+        why = self.card_why_line(card)
+        agent_row, jump_row = self.card_meta_parts(card, crew)
+        run_row = self.card_run_line(card, inner)
         lines = [
             f"{fg(border_c)}{top}{RESET}",
-            mid(card.badge, card.badge_color),
-            mid(self.card_agent_line(card), C_DIM),
+            mid(self.card_badge_line(card, inner), card.badge_color),
             mid(card.title or card.task),
-            mid(self.card_status_line(card, inner), C_WARN),
-            mid(
-                self.card_footer_line(
-                    card,
-                    self._crew_label(snap, card.home_path)
-                    if snap is not None and snap.home is not None and is_aggregate_home(snap.home)
-                    else "",
-                ),
-                C_DIM,
-            ),
+            *([mid(why, C_DIM)] if why else []),
+            *([mid(agent_row, C_DIM)] if agent_row else []),
+            *([mid(run_row, C_DIM)] if run_row else []),
+            *([mid(jump_row, C_DIM)] if jump_row else []),
             f"{fg(border_c)}{'\u2570' + '\u2500' * (cardw - 2) + '\u256f'}{RESET}",
         ]
         # pad each row to the full column width so the separator keeps a gap
@@ -2754,36 +2802,96 @@ class UI:
         return "\u00b7".join(parts) if parts else "no agent yet"
 
     @staticmethod
+    def card_why_line(card: Card) -> str:
+        """Context under the title, only when it adds something the badge does not.
+
+        Gate reasons and decision prompts lead; an underway card shows its
+        ``doing`` tail unless it just repeats the badge or says what every live
+        pane says (``harness busy ...``).
+        """
+        if card.bucket == "landed":
+            return ""
+        label = badge_label_from_badge(card.badge or "")
+        doing = " ".join((card.doing or "").split())
+        low = doing.lower()
+        if low in ("", "-") or low.startswith("harness busy") or low == label:
+            doing = ""
+        if doing:
+            return doing
+        blocked_by = (card.blocked_by or "").strip()
+        if blocked_by and blocked_by != "-":
+            return f"blocked by {blocked_by}"
+        return ""
+
+    @staticmethod
+    def card_meta_parts(card: Card, crew: str = "") -> tuple[str, str]:
+        """(agent line, jump target) for the rows around the totals row.
+
+        The totals row sits between them, so the two never merge; a card with
+        no agent yet shows the jump target alone instead of stacking a
+        placeholder on top of it.
+        """
+        footer = UI.card_footer_line(card, crew)
+        has_agent = bool(card.agent or card.model or card.effort)
+        agent = UI.card_agent_line(card) if has_agent else ""
+        if not agent and not footer:
+            agent = UI.card_agent_line(card)
+        return agent, footer
+
+    @staticmethod
+    def card_badge_line(card: Card, inner: int) -> str:
+        """Live status badge; run totals live on their own row below the agent."""
+        return clip(card.badge or "", inner)
+
+    @staticmethod
+    def card_run_line(card: Card, inner: int = 0) -> str:
+        """Total wall time and total tokens, between the agent and jump rows.
+
+        Herdr-style ``9min 59s \u25cf 55.5k tok``; narrow cards drop to compact
+        time and then the unit so both totals stay readable.
+        """
+        elapsed = getattr(card, "run_elapsed", "") or ""
+        tokens = getattr(card, "run_tokens", "") or ""
+        if card.live_status not in ("working", "blocked") or not (elapsed or tokens):
+            return ""
+        pretty = _format_elapsed_deck(elapsed)
+        short = _format_elapsed_short(elapsed)
+        tok = _format_tokens_deck(tokens)
+        tok_plain = tok[: -len(" tok")] if tok.endswith(" tok") else tok
+        candidates: list[str] = []
+        if pretty and tok:
+            candidates.append(f"{pretty} \u25cf {tok}")
+        if short and tok:
+            candidates.append(f"{short} \u25cf {tok}")
+        if short and tok_plain:
+            candidates.append(f"{short} \u25cf {tok_plain}")
+        candidates = [c for c in candidates if c]
+        if not candidates:
+            return ""
+        if inner:
+            for candidate in candidates:
+                if display_width(candidate) <= inner:
+                    return candidate
+            return clip(candidates[-1], inner)
+        return candidates[0]
+
+    @staticmethod
     def card_run_stats_suffix(card: Card) -> str:
-        """Herdr-style ``(9m 59s · ↓ 55.5k tokens)`` suffix for the status line."""
+        """Compact badge-row stats (tests / callers)."""
         elapsed = getattr(card, "run_elapsed", "") or ""
         tokens = getattr(card, "run_tokens", "") or ""
         if not elapsed and not tokens:
             return ""
         parts: list[str] = []
         if elapsed:
-            parts.append(elapsed)
+            parts.append(_format_elapsed_deck(elapsed))
         if tokens:
-            parts.append(f"\u2193 {tokens} tokens")
-        return f" ({' \u00b7 '.join(parts)})"
+            parts.append(_format_tokens_deck(tokens))
+        return f" \u25cf ".join(parts)
 
     @staticmethod
     def card_run_stats_line(card: Card) -> str:
-        """Legacy helper; prefer ``card_run_stats_suffix`` on the status row."""
-        suffix = UI.card_run_stats_suffix(card)
-        return suffix.strip(" ()") if suffix else ""
-
-    @staticmethod
-    def card_status_line(card: Card, inner: int) -> str:
-        """Ticket status (``doing`` / status tail) plus total run time and tokens."""
-        base = (card.doing or "").strip()
-        if not base:
-            base = (card.status_text or "").strip()
-        suffix = UI.card_run_stats_suffix(card)
-        if not base and not suffix:
-            return ""
-        plain = f"{base}{suffix}" if base else suffix.strip()
-        return clip(plain, inner)
+        return UI.card_run_stats_suffix(card)
 
     @staticmethod
     def card_footer_line(card: Card, crew: str = "") -> str:
