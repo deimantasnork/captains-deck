@@ -1,0 +1,20 @@
+{
+  "schema": "fm-decision-card.v1",
+  "generated": "2026-01-01T00:00:00Z",
+  "card": {
+    "key": "demo/decision-1",
+    "type": "decision",
+    "repo": "demo",
+    "title": "OAuth scope: prod or staging?",
+    "about": "The retry touches the OAuth client id.",
+    "decide": "Pick the client id this ships with.",
+    "options": [
+      {"value": "staging", "label": "Use staging", "hint": "safe rollout"},
+      {"value": "prod", "label": "Use production", "hint": "customer traffic"},
+      {"value": "reconcile", "label": "Reconcile", "hint": "re-check the latest state"}
+    ],
+    "recommend_value": "staging",
+    "allow_freeform": true,
+    "freeform_hint": "Or explain another way"
+  }
+}

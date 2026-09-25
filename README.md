@@ -168,6 +168,31 @@ ticket, `o` opens the selected agent pane, `1-9` / `tab` switch crew
 and `q` quits. `esc` or `?` closes the modal, and a click outside it closes it
 too.
 
+## Keeping up with Firstmate updates
+
+Firstmate updates itself (`updatefirstmate`, fleet sync) and this deck reads
+its live surfaces from the home, so drift usually shows up as empty or quiet
+cards rather than an error. Three guards keep that visible:
+
+- **Contract check** - `scripts/fm-contract-check.sh --home ~/firstmate` (or
+  `python3 scripts/fm_contract_check.py --home ~/firstmate --json`) runs the
+  home's `bin/fm-bearings-snapshot.sh --json --fields paths` and asserts every
+  section, item field, meta key, status line, decision card, and the
+  `fm-captain-hold.sh` / `fm-send.sh` intakes that the deck reads. Exit code 1
+  lists the missing surface; run it after an `updatefirstmate`.
+- **Recorded fixtures** - `tests/fixtures/` keeps a sanitized snapshot and a
+  minimal home. `tests/test_fixture_board.py` proves the recorded shape still
+  projects into the same columns, and `tests/test_fm_contract_check.py` proves
+  the checker itself catches a dropped field.
+- **Nightly drift alarm** - `.github/workflows/firstmate-contract.yml` clones
+  `kunchenguid/firstmate@main` every night, runs the contract check against it,
+  and opens or comments on an issue labelled `firstmate-drift` when a surface
+  changes.
+
+For field reports, `FM_FLOW_DEBUG=/tmp/fm_flow_debug.log` stamps the deck
+revision and each home's Firstmate revision on every collector pass, so a log
+pins the exact pair.
+
 ## Answering a Captain's Call ticket
 
 Clicking a Captain's Call ticket (or pressing `Enter` on it) opens its decision

@@ -31,14 +31,16 @@ Please include:
    herdr plugin enable herdr-firstmate-flow
    ```
 
-4. Run the focused Python checks before you push:
+4. Run the checks before you push:
 
    ```sh
    python3 tests/test_flow_decision_dialog.py
-   python3 -m pytest tests/test_flow_all_crew.py -q
+   python3 -m pytest tests/ -q
+   python3 scripts/fm_contract_check.py --home tests/fixtures/home
    ```
 
-   `pytest` is only required for `test_flow_all_crew.py`; install it with `pip install pytest` if needed.
+   `pytest` is required for the test suite; install it with `pip install pytest` if needed.
+   The contract check runs against the recorded fixture home here; point `--home` at a real Firstmate home to check the live surfaces after an `updatefirstmate`.
 
 5. Open a pull request against `main` with a short summary and test notes.
 
@@ -48,6 +50,7 @@ Smaller, focused changes are easier to land than large rewrites.
 ## Repo conventions
 
 - `scripts/flow_tui.py` owns the Captain's Deck TUI; keep bash helpers in `scripts/`.
+- `scripts/fm_contract_check.py` owns the Firstmate contract check; add a field there and a matching fixture assertion when the deck reads a new surface.
 - `herdr-plugin.toml` is the Herdr marketplace manifest; bump `version` when you ship user-visible behavior.
 - In Markdown, put each full sentence on its own line (same style as [Firstmate](https://github.com/kunchenguid/firstmate)).
 - `README.md` stays a concise overview; route long detail to comments in code or issue discussion unless it belongs in the README.

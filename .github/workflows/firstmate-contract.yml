@@ -1,0 +1,52 @@
+name: Firstmate contract
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Clone firstmate@main
+        run: git clone --depth 1 https://github.com/kunchenguid/firstmate /tmp/firstmate
+      - name: Contract check against firstmate@main
+        id: contract
+        run: |
+          python3 scripts/fm_contract_check.py --home /tmp/firstmate > /tmp/contract.txt 2>&1 && rc=0 || rc=$?
+          cat /tmp/contract.txt
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+      - name: Open or update the drift issue
+        if: steps.contract.outputs.rc != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh label create firstmate-drift --description "Nightly Firstmate contract drift" --color D93F0B 2>/dev/null || true
+          {
+            echo "The nightly contract check against \`kunchenguid/firstmate@main\` failed."
+            echo
+            echo '```'
+            tail -60 /tmp/contract.txt
+            echo '```'
+            echo
+            echo "Run \`python3 scripts/fm_contract_check.py --home <firstmate-home>\` locally to reproduce."
+          } > /tmp/body.md
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --label firstmate-drift --state open --limit 1 --json number -q '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file /tmp/body.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --label firstmate-drift --title "Firstmate contract drift (nightly)" --body-file /tmp/body.md
+          fi
+      - name: Fail the job on drift
+        if: steps.contract.outputs.rc != '0'
+        run: exit 1
