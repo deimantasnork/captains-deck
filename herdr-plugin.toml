@@ -9,7 +9,7 @@
 #   herdr plugin link /path/to/herdr-firstmate-flow
 id = "herdr-firstmate-flow"
 name = "Captain's Deck"
-version = "0.7.0"
+version = "0.7.1"
 description = "Captain's Deck: multi-home kanban for Firstmate and its secondmates: an All fleet tab plus per-crew tabs, live activity, per-ticket status badges, agent/model/thinking, component-level refresh, scrollable columns, click a ticket to open its agent pane, and a Captain's Call decision dialog backed by firstmate's keyed-answer intake with visible close/release and steer effects."
 min_herdr_version = "0.9.0"
 platforms = ["linux", "macos"]

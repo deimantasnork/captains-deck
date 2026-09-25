@@ -109,6 +109,13 @@ Captain's Call answer (see below), where the captain's own decision goes to
 Firstmate's guarded keyed-answer intake, and the owning lane is steered so the
 answer is acted on.
 
+The fleet board folds a task that more than one home lists - a captain home
+mirrors delegated work as `<mate>/<task>` while the mate's own home keeps
+`<task>` - into the owning home's row, in the column that row reports, so one
+task is one card. Captain's Call rows already fold that way for answer routing;
+two same-named tasks in different repos (no matching namespace, run, or
+worktree) stay separate.
+
 | Column | Source |
 | --- | --- |
 | **Charted Next** | `gates` |
