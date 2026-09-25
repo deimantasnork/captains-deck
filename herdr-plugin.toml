@@ -3,8 +3,8 @@
 # Landed). Captain's Call tickets open a decision dialog that feeds
 # firstmate's one keyed-answer intake; everything else stays read-only.
 #
-# Share: https://github.com/Enk1do/captains-deck
-#   herdr plugin install Enk1do/captains-deck
+# Share: https://github.com/deimantasnork/captains-deck
+#   herdr plugin install deimantasnork/captains-deck
 # Local dev:
 #   herdr plugin link /path/to/herdr-firstmate-flow
 id = "herdr-firstmate-flow"
