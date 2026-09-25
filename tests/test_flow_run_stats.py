@@ -43,70 +43,50 @@ def test_parse_pi_footer_tokens():
     assert tokens == "31k"
 
 
-def test_format_elapsed_deck():
-    assert flow._format_elapsed_deck("3m 45s") == "3min 45s"
-    assert flow._format_elapsed_deck("45s") == "45s"
-
-
-def test_format_tokens_deck():
-    assert flow._format_tokens_deck("75") == "75 tok"
-    assert flow._format_tokens_deck("75k") == "75k tok"
-    assert flow._format_tokens_deck("4.5M") == "4.5M tok"
-
-
 def test_card_run_stats_suffix():
     card = flow.Card()
     card.run_elapsed = "4m 2s"
     card.run_tokens = "12.1k"
     suffix = flow.UI.card_run_stats_suffix(card)
-    assert suffix == "4min 2s \u25cf 12.1k tok"
+    assert suffix == " (4m 2s · ↓ 12.1k tok)"
 
 
-def test_card_badge_line_with_run_stats():
+def test_card_status_line_appends_stats_to_doing():
     card = flow.Card()
-    card.badge = "\u25d0 validating"
-    card.live_status = "working"
+    card.badge = "● shipping"
+    card.doing = "editing auth/client.rs"
     card.run_elapsed = "9m 59s"
     card.run_tokens = "55.5k"
-    assert flow.UI.card_badge_line(card, 80) == "validating \u25cf 9min 59s \u25cf 55.5k tok"
+    line = flow.UI.card_status_line(card, 80)
+    assert line == "editing auth/client.rs (9m 59s · ↓ 55.5k tok)"
 
 
-def test_card_badge_line_without_stats_uses_symbol_badge():
+def test_card_status_line_drops_state_that_repeats_the_badge():
     card = flow.Card()
-    card.badge = "\u00b7 queued"
-    card.live_status = "idle"
-    line = flow.UI.card_badge_line(card, 80)
-    assert line == "\u00b7 queued"
+    card.badge = "◐ validating"
+    card.doing = "validating: e2e payments"
+    card.run_elapsed = "3m 45s"
+    card.run_tokens = "75"
+    line = flow.UI.card_status_line(card, 80)
+    assert line == "(3m 45s · ↓ 75 tok)"
 
 
-def test_card_badge_line_degrades_on_narrow_cards():
+def test_card_status_line_drops_harness_busy_noise():
     card = flow.Card()
-    card.badge = "\u25cf shipping"
-    card.live_status = "working"
+    card.badge = "● shipping"
+    card.doing = "harness busy (claude-hook)"
     card.run_elapsed = "9m 59s"
     card.run_tokens = "55.5k"
-    assert flow.UI.card_badge_line(card, 31) == "shipping \u25cf 9min 59s \u25cf 55.5k tok"
-    assert flow.UI.card_badge_line(card, 24) == "shipping \u25cf 9m59s \u25cf 55.5k"
-    assert flow.UI.card_badge_line(card, 16) == "\u25cf 9m59s \u00b7 55.5k"
-    assert flow.UI.card_badge_line(card, 8) == "shipping"
+    line = flow.UI.card_status_line(card, 80)
+    assert line == "(9m 59s · ↓ 55.5k tok)"
 
 
-def test_card_badge_line_symbol_carries_long_labels():
+def test_card_status_line_empty_without_status_or_stats():
     card = flow.Card()
-    card.badge = "\u25d0 validating"
-    card.live_status = "working"
-    card.run_elapsed = "9m 59s"
-    card.run_tokens = "55.5k"
-    assert flow.UI.card_badge_line(card, 24) == "\u25d0 9m59s \u00b7 55.5k"
-
-
-def test_card_badge_line_blocked_keeps_word_at_deck_width():
-    card = flow.Card()
-    card.badge = "\u26d4 blocked"
-    card.live_status = "blocked"
-    card.run_elapsed = "18m 2s"
-    card.run_tokens = "220k"
-    assert flow.UI.card_badge_line(card, 24) == "blocked \u25cf 18m2s \u25cf 220k"
+    card.badge = "· queued"
+    card.doing = ""
+    card.status_text = ""
+    assert flow.UI.card_status_line(card, 80) == ""
 
 
 def test_parse_spawn_gen_epoch():

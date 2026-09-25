@@ -60,34 +60,27 @@ when that column is visible.
 ## What each ticket shows
 
 ```text
-╭─ demo-issue-197 ───────────────────╮
-│ shipping ● 9min 59s ● 55.5k tok    │   live badge + run totals
+╭─ demo-issue-197 ─────────────────────╮
+│ ◐ validating                         │   live badge
 │ claude·opus·xhigh                    │   harness · model · thinking effort
-│ Add retry to the OAuth callback      │   title (or the "what" for landed)
-│ ⌸ 4/my-app…                          │   worktree / PR jump target (crew on All)
-╰────────────────────╯
+│ Add retry to the…                    │   title / summary / landed what
+│ (9m 59s · ↓ 55.5k tok)               │   total run time · total tokens
+│ ⌸ 4/my-app-feat…                     │   worktree (or ↗ PR artifact for landed)
+╰──────────────────────────────────────╯
 ```
-
-Every card is six rows: id, live badge, agent line, title, and the jump target.
-The badge carries **total wall time since the task spawned** and **total
-tokens** (Herdr detection, or cumulative Pi session usage) whenever the agent
-is `shipping` or `blocked`; other states keep the symbolic badge alone.
 
 Badges: `● shipping`, `◐ validating`, `⛔ blocked`, `⚑ decision` /
 `⚑ captain`, `◍ awaits merge`, `⏸ parked` / `⏸ paused`, `⛔ failed`,
 `✓ done` / `✓ landed`, `· queued`.
 Live state comes from `herdr agent list`; activity and review state come from
 Firstmate's bearings snapshot and the home's `state/<task>.status` tail.
-Other states keep the symbolic badge only.
-
-A live badge row shrinks to fit its column instead of clipping the totals:
-
-| Card inner width | Badge row |
-| --- | --- |
-| ≥ 31 | `shipping ● 9min 59s ● 55.5k tok` |
-| ~24 | `shipping ● 9m59s ● 55.5k` |
-| ~16 | `◐ 9m59s · 55.5k` (state symbol replaces the word) |
-| tiny | `shipping` |
+While an agent is **shipping** or **blocked**, the **doing/status** line carries
+total run time and token use in the same style as Herdr's agent sidebar (wall
+time since task spawn when available; tokens from detection or cumulative Pi
+session usage). A `doing` value that only repeats the badge (`validating`,
+`validating: …`) or the generic `harness busy …` line is dropped, so the row
+shows the totals alone; a `doing` that adds real detail keeps it before the
+totals.
 
 ## Answering a Captain's Call ticket
 
