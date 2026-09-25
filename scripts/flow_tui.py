@@ -119,6 +119,37 @@ def _debug(msg: str) -> None:
         pass
 
 
+_REV_CACHE: dict[str, str] = {}
+
+
+def _git_revision(path: str) -> str:
+    """Short commit for a checkout; "" when it is not a git work tree."""
+    if not path:
+        return ""
+    if path in _REV_CACHE:
+        return _REV_CACHE[path]
+    rev = ""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", path, "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            env=dict(os.environ, GIT_OPTIONAL_LOCKS="0"),
+            stdin=subprocess.DEVNULL,
+        )
+        if proc.returncode == 0:
+            rev = (proc.stdout or "").strip()
+    except Exception:
+        rev = ""
+    _REV_CACHE[path] = rev
+    return rev
+
+
+def _deck_revision() -> str:
+    return _git_revision(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
 def _int(value, default: int = 0) -> int:
     try:
         return int(value)
@@ -1792,6 +1823,7 @@ class Collector(threading.Thread):
 
     def run(self) -> None:
         _debug("collector start")
+        _debug(f"deck herdr-firstmate-flow rev={_deck_revision() or 'unknown'}")
         self._discover(force=True)
         while not self._stop.is_set():
             started = time.time()
@@ -1799,6 +1831,13 @@ class Collector(threading.Thread):
                 _debug("iter: discover")
                 homes = self._discover()
                 _debug(f"iter: homes={len(homes)}")
+                for home in homes:
+                    if not is_aggregate_home(home):
+                        _debug(
+                            f"iter: home {home.label} "
+                            f"firstmate={_git_revision(home.path) or 'unknown'} "
+                            f"path={home.path}"
+                        )
                 if not homes:
                     snap = Snapshot()
                     snap.error = "no Firstmate homes found (set FM_FLOW_HOMES or homes.conf)"
@@ -1806,7 +1845,10 @@ class Collector(threading.Thread):
                 else:
                     active = next((h for h in homes if h.label == self._active), homes[0])
                     self._active = active.label
-                    _debug(f"iter: agents for {active.label}")
+                    _debug(
+                        f"iter: agents for {active.label} "
+                        f"firstmate={_git_revision(active.path) or 'unknown'}"
+                    )
                     agents, panes = herdr_agents()
                     _debug(f"iter: agents={len(agents)} panes={len(panes)}")
                     now = time.time()

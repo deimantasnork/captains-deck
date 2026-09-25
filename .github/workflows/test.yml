@@ -13,9 +13,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install pytest
+        run: pip install pytest
+      - name: Unit tests
+        run: python3 -m pytest tests/ -q
       - name: Decision dialog checks
         run: python3 tests/test_flow_decision_dialog.py
-      - name: Fleet All tab checks
-        run: |
-          pip install pytest
-          python3 -m pytest tests/test_flow_all_crew.py -q
+      - name: Firstmate contract (fixture home)
+        run: python3 scripts/fm_contract_check.py --home tests/fixtures/home

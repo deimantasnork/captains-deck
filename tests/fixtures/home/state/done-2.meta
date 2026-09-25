@@ -1,0 +1,6 @@
+harness=pi
+model=sonnet
+effort=medium
+mode=local-only
+spawn_gen=s1790289100.10000.1000
+worktree=/tmp/treehouse/demo/2/demo-done-2

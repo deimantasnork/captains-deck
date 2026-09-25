@@ -1,0 +1,80 @@
+{
+  "schema": "fm-bearings.v1",
+  "home": "fixture",
+  "generated": "2026-01-01T00:00:00Z",
+  "prs": "not_requested",
+  "gates": [
+    {
+      "id": "demo-queued-1",
+      "title": "Add retry to the OAuth callback",
+      "reason": "-",
+      "blocked_by": "-",
+      "owner": "(main)",
+      "filed": "2026-01-01"
+    },
+    {
+      "id": "demo-blocked-2",
+      "title": "Run the DB migration before ship",
+      "reason": "waiting on the schema lane",
+      "blocked_by": "schema-migrate-3",
+      "owner": "(main)",
+      "filed": "2026-01-01"
+    }
+  ],
+  "in_flight": [
+    {
+      "id": "demo/work-1",
+      "name": "Add retry to the OAuth callback",
+      "doing": "harness busy (claude-hook)",
+      "state": "working",
+      "kind": "ship",
+      "repo": "demo"
+    },
+    {
+      "id": "demo/done-2",
+      "name": "Add Redis cache to the listings API",
+      "doing": "",
+      "state": "done",
+      "kind": "ship",
+      "repo": "demo"
+    }
+  ],
+  "decisions_open": [
+    {
+      "id": "demo/decision-1",
+      "key": "demo/decision-1",
+      "title": "OAuth scope: prod or staging?",
+      "summary": "OAuth scope: prod or staging?: which client id ships",
+      "reason": "DECIDE: which client id to ship",
+      "verb": "DECIDE",
+      "owner": "(main)"
+    }
+  ],
+  "landed": [
+    {
+      "id": "demo/landed-1",
+      "what": "Merged OAuth retry + tests",
+      "artifact": "pull/412-feat-oauth-retry",
+      "owner": "(main)"
+    }
+  ],
+  "paths": [
+    {
+      "id": "demo/work-1",
+      "worktree": "/tmp/treehouse/demo/1/demo-work-1",
+      "home": "fixture",
+      "status": "",
+      "report": ""
+    },
+    {
+      "id": "demo/done-2",
+      "worktree": "/tmp/treehouse/demo/2/demo-done-2",
+      "home": "fixture",
+      "status": "",
+      "report": ""
+    }
+  ],
+  "secondmates": [],
+  "omitted": {},
+  "recorded_prs": []
+}
