@@ -255,6 +255,32 @@ def fleet_planned_running_count(
     return total if seen else None
 
 
+def _pick_captains_call_duplicate(cards: list[Card]) -> Card:
+    """When the fleet merges two snapshots for one task, keep the routable row."""
+    explicit = [c for c in cards if c.owner and c.owner != "(main)"]
+    if explicit:
+        return explicit[0]
+    with_path = [c for c in cards if c.home_path]
+    if with_path:
+        return with_path[0]
+    return cards[0]
+
+
+def _dedupe_captains_call(cards: list[Card]) -> list[Card]:
+    by_task: dict[str, list[Card]] = {}
+    order: list[str] = []
+    for card in cards:
+        if card.task not in by_task:
+            order.append(card.task)
+            by_task[card.task] = []
+        by_task[card.task].append(card)
+    return [
+        group[0] if len(group) == 1 else _pick_captains_call_duplicate(group)
+        for task in order
+        for group in [by_task[task]]
+    ]
+
+
 def merge_fleet_columns(
     parts: list[tuple[Home, dict[str, list[Card]], dict[str, int]]],
 ) -> tuple[dict[str, list[Card]], dict[str, int]]:
@@ -276,6 +302,10 @@ def merge_fleet_columns(
 
     for key in ACTIVE_BUCKETS:
         cols[key].sort(key=sort_key)
+    if cols["captains_call"]:
+        before = len(cols["captains_call"])
+        cols["captains_call"] = _dedupe_captains_call(cols["captains_call"])
+        totals["captains_call"] -= before - len(cols["captains_call"])
     return cols, totals
 
 
@@ -1037,6 +1067,23 @@ def resolve_owner_lane(homes: list[Home] | None, owner: str) -> tuple[Home | Non
     return None, ""
 
 
+def answer_home_path(
+    card: Card, homes: list[Home] | None, active: Home | None
+) -> str:
+    """The home whose ``fm-captain-hold.sh`` should intake this call's answer."""
+    owner = (card.owner or "").strip()
+    owner_home = resolve_owner_home(homes, owner, active)
+    if owner_home is not None and owner_home.path:
+        return owner_home.path
+    if owner and owner != "(main)":
+        return ""
+    if card.home_path:
+        return card.home_path
+    if active is not None and active.path and not is_aggregate_home(active):
+        return active.path
+    return ""
+
+
 def _decision_lookup_homes(
     homes: list[Home] | None, owner_home: Home | None, active: Home | None
 ) -> list[Home]:
@@ -1132,7 +1179,7 @@ def decision_card_content(
             raw.get("freeform_hint") or "or answer in your own words\u2026"
         ),
         "close": raw.get("close") if raw.get("close") in ("done", "release") else "",
-        "home_path": owner_home.path if owner_home is not None else "",
+        "home_path": answer_home_path(card, homes, active),
         "wake_home": wake_home.path if wake_home is not None else "",
         "wake_lane": wake_lane,
     }
@@ -1565,8 +1612,7 @@ def make_cards(
         # The row's owner names the home whose backlog holds the call, so the
         # answer runs the intake in that home rather than the board on screen.
         c.owner = (entry.get("owner") or "").strip()
-        owner_home = resolve_owner_home(homes, c.owner, home)
-        c.home_path = owner_home.path if owner_home is not None else ""
+        c.home_path = answer_home_path(c, homes, home)
         cols["captains_call"].append(c)
         totals["captains_call"] += 1
 

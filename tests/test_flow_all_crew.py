@@ -65,3 +65,22 @@ def test_fleet_planned_running_count_excludes_landed():
     counts = {"captain": 5}
     landed = {"captain": 2}
     assert fleet_planned_running_count(homes, counts, landed) == 3
+
+
+def test_merge_dedupes_captains_call_by_task():
+    captain = Home("captain", "/captain", "captain")
+    mate = Home("2ndmate-x", "/mate", "secondmate")
+    dup_a = _card("fpr-issue-29", "/mate", "captains_call")
+    dup_a.owner = "demo-lane"
+    dup_b = _card("fpr-issue-29", "/mate", "captains_call")
+    dup_b.owner = "(main)"
+    cols_c = {"captains_call": [dup_a]}
+    cols_m = {"captains_call": [dup_b]}
+    totals_c = {"captains_call": 1}
+    totals_m = {"captains_call": 1}
+    cols, totals = merge_fleet_columns(
+        [(captain, cols_c, totals_c), (mate, cols_m, totals_m)]
+    )
+    assert [c.task for c in cols["captains_call"]] == ["fpr-issue-29"]
+    assert cols["captains_call"][0].owner == "demo-lane"
+    assert totals["captains_call"] == 1
