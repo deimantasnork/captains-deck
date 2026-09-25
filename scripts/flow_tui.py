@@ -53,6 +53,9 @@ COLUMNS = [
 # answer intake owns (bin/fm-captain-hold.sh answers). This is a channel, not a
 # decision-maker: it never resolves a task itself, and the reserved `reconcile`
 # value goes to the separate reconcile-request intake, never to `answers`.
+# Footer entry point for the keybinding help modal (click it or press ?).
+_HELP_HINT = "? help"
+
 DECISION_SOURCE_ID = "herdr-firstmate-flow"
 DECISION_SOURCE = "herdr-firstmate-flow captain's deck"
 ANSWER_LIMIT = 512  # bytes, the board's own bound
@@ -1966,6 +1969,9 @@ class UI:
         self.dialog_box: tuple[int, int, int, int] | None = None
         self.dialog_scroll = 0
         self._dialog_scroll_follow = False
+        self.help = False
+        self.help_box: tuple[int, int, int, int] | None = None
+        self.help_region: tuple[int, int] | None = None
 
     # -- helpers ------------------------------------------------------------
     def say(self, msg: str) -> None:
@@ -2243,6 +2249,13 @@ class UI:
     def click(self, x: int, y: int, button: int) -> None:
         _debug(f"click x={x} y={y} button={button} regions={len(self.card_regions)}")
         self.dirty = True
+        if self.help:
+            if button in (64, 65, 68, 69):
+                return
+            box = self.help_box
+            if not (box and box[0] <= x < box[2] and box[1] <= y < box[3]):
+                self.close_help()
+            return
         if self.dialog is not None:
             self._click_dialog(x, y, button)
             return
@@ -2254,6 +2267,13 @@ class UI:
             else:
                 ci = min(len(self.columns) - 1, max(0, x // max(1, self.colw + 1)))
                 self.scroll_by(self.columns[ci][0], delta)
+            return
+        if (
+            self.help_region is not None
+            and y == self.height - 1
+            and self.help_region[0] <= x < self.help_region[1]
+        ):
+            self.open_help()
             return
         for x1, x2, label in self.tab_regions:
             if y == 0 and x1 <= x < x2:
@@ -2283,6 +2303,7 @@ class UI:
         lines: list[str] = []
         self.tab_regions = []
         self.card_regions = []
+        self.help_box = None
 
         # a crew switch is "done" once the collector publishes that home
         if snap.home is not None and self.pending_home == snap.home.label:
@@ -2401,18 +2422,19 @@ class UI:
         # footer
         while len(lines) < h - 1:
             lines.append("")
-        help_line = (
-            " \u2190\u2192 cols \u00b7 \u2191\u2193 cards \u00b7 pgup/pgdn or wheel scroll \u00b7 "
-            "click crew name \u00b7 enter/click decides \u00b7 o opens agent \u00b7 1-9/tab crew (All=fleet) \u00b7 L landed \u00b7 r refresh \u00b7 q quit"
-        )
-        lines.append(f"{fg(C_DIM)}{clip(help_line, w)}{RESET}")
+        self.help_region = None
+        lines.append(f"{fg(C_DIM)}{clip(' ' + _HELP_HINT, w)}{RESET}")
         if self.flash and time.time() - self.flash_at < 6:
             lines[-1] = f"{fg(C_WARN)}{clip(self.flash, w)}{RESET}"
         elif snap.error:
             lines[-1] = f"{fg(C_BAD)}{clip(snap.error, w)}{RESET}"
+        else:
+            self.help_region = (1, 1 + display_width(_HELP_HINT))
 
         if self.dialog is not None:
             self.render_dialog(lines, w, h)
+        if self.help:
+            self.render_help(lines, w, h)
         self.paint([clip_ansi(line, w) for line in lines[:h]], w, h)
 
     def paint(self, frame: list[str], w: int, h: int) -> None:
@@ -2713,6 +2735,58 @@ class UI:
             elif kind == "note":
                 self.dialog_hit.append((y, x0, x0 + dw, "note", 0))
 
+    HELP_ROWS = (
+        ("\u2190\u2192 / h l", "move between columns"),
+        ("\u2191\u2193 / j k", "move between cards"),
+        ("pgup/pgdn, wheel", "scroll the column"),
+        ("click a crew tab", "switch mate"),
+        ("enter / click", "open a Captain's Call ticket"),
+        ("o", "open the selected agent pane"),
+        ("1-9 / tab", "switch crew (All = fleet)"),
+        ("L", "toggle the Landed column"),
+        ("r", "refresh the board"),
+        ("? / esc", "close this help"),
+        ("q", "quit"),
+    )
+
+    def open_help(self) -> None:
+        self.help = True
+        self.help_box = None
+        self.dirty = True
+
+    def close_help(self) -> None:
+        self.help = False
+        self.help_box = None
+        self.dirty = True
+
+    def render_help(self, lines: list[str], w: int, h: int) -> None:
+        """Draw the keybinding help as a centered modal (footer ``? help``)."""
+        self.help_box = None
+        keyw = max(display_width(key) for key, _ in self.HELP_ROWS)
+        cw = keyw + 3 + max(display_width(desc) for _, desc in self.HELP_ROWS)
+        dw = min(max(34, cw + 4), max(34, w - 4))
+        inner = dw - 4
+        box_h = len(self.HELP_ROWS) + 2
+        y0 = max(0, min(max(0, h - box_h - 1), (h - box_h) // 2))
+        x0 = max(0, (w - dw) // 2)
+        border = fg(C_BORDER)
+        box = [f"{border}\u256d\u2500 Help " + "\u2500" * max(0, dw - 9) + f"\u256e{RESET}"]
+        for key, desc in self.HELP_ROWS:
+            key_text = pad(key, keyw + 3)
+            desc_text = clip(desc, max(0, inner - keyw - 3))
+            styled = f"{fg(C_DIM)}{key_text}{RESET}{desc_text}"
+            padding = " " * max(
+                0, inner - display_width(key_text) - display_width(desc_text)
+            )
+            box.append(f"{border}\u2502{RESET} {styled}{padding} {border}\u2502{RESET}")
+        box.append(f"{border}\u2570" + "\u2500" * (dw - 2) + f"\u256f{RESET}")
+        self.help_box = (x0, y0, x0 + dw, y0 + box_h)
+        left = " " * x0
+        for i, dl in enumerate(box):
+            y = y0 + i
+            if 0 <= y < len(lines):
+                lines[y] = left + dl + " " * max(0, w - x0 - ansi_width(dl))
+
     def _crew_label(self, snap: Snapshot, home_path: str) -> str:
         if not home_path:
             return ""
@@ -2766,7 +2840,7 @@ class UI:
 
     @staticmethod
     def card_run_stats_suffix(card: Card) -> str:
-        """Herdr-style ``(9m 59s · ↓ 55.5k tok)`` suffix for the status line."""
+        """Herdr-style ``9m 59s · ↓ 55.5k tokens`` suffix for the status line."""
         elapsed = getattr(card, "run_elapsed", "") or ""
         tokens = getattr(card, "run_tokens", "") or ""
         if not elapsed and not tokens:
@@ -2775,8 +2849,8 @@ class UI:
         if elapsed:
             parts.append(elapsed)
         if tokens:
-            parts.append(f"\u2193 {tokens} tok")
-        return f" ({' \u00b7 '.join(parts)})"
+            parts.append(f"\u2193 {tokens} tokens")
+        return " \u00b7 ".join(parts)
 
     @staticmethod
     def card_run_stats_line(card: Card) -> str:
@@ -2790,7 +2864,8 @@ class UI:
 
         A ``doing`` that just repeats the badge (``validating`` or
         ``validating: ...``) or the generic ``harness busy ...`` liveness line is
-        dropped, so the row carries only total run time and total tokens.
+        dropped, so the row carries only the totals. Validating and blocked rows
+        also carry the thinking effort when the row has room for it.
         """
         base = (card.doing or "").strip()
         if not base:
@@ -2799,10 +2874,16 @@ class UI:
         low = base.lower()
         if low.startswith("harness busy") or (label and low.startswith(label)):
             base = ""
-        suffix = UI.card_run_stats_suffix(card)
-        if not base and not suffix:
+        stats = UI.card_run_stats_suffix(card)
+        if not base and not stats:
             return ""
-        plain = f"{base}{suffix}" if base else suffix.strip()
+        plain = f"{base} \u00b7 {stats}" if base and stats else (base or stats)
+        if label in ("validating", "blocked"):
+            effort = (getattr(card, "effort", "") or "").strip()
+            if effort:
+                with_effort = f"{plain} \u00b7 {effort}" if plain else effort
+                if not inner or display_width(with_effort) <= inner:
+                    plain = with_effort
         return clip(plain, inner)
 
     @staticmethod
@@ -2921,6 +3002,8 @@ def parse_input(buf: bytes, ui: UI) -> bytes:
             buf = buf[1:]
             if ui.dialog is not None:
                 ui.close_dialog()
+            elif ui.help:
+                ui.close_help()
             continue
         # decode one whole character, waiting for the rest of a multibyte
         # sequence instead of dropping it (captain notes are typed here)
@@ -2967,6 +3050,10 @@ def parse_input(buf: bytes, ui: UI) -> bytes:
             elif text.isprintable():
                 ui.dialog_type(text)
             continue
+        if ui.help:
+            if text in ("?", "h", "q", " "):
+                ui.close_help()
+            continue
         if text in ("q", "\x03", "\x04"):
             ui.quitting = True
         elif text == "r":
@@ -3001,6 +3088,8 @@ def parse_input(buf: bytes, ui: UI) -> bytes:
             ui.toggle_landed()
         elif text == "o":
             ui.open_selected()
+        elif text == "?":
+            ui.open_help()
         elif text in ("\r", "\n"):
             ui.activate()
     return buf

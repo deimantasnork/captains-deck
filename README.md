@@ -64,7 +64,7 @@ when that column is visible.
 │ ◐ validating                         │   live badge
 │ claude·opus·xhigh                    │   harness · model · thinking effort
 │ Add retry to the…                    │   title / summary / landed what
-│ (9m 59s · ↓ 55.5k tok)               │   total run time · total tokens
+│ 9m 59s · ↓ 55.5k tokens · xhigh      │   total run time · tokens · thinking
 │ ⌸ 4/my-app-feat…                     │   worktree (or ↗ PR artifact for landed)
 ╰──────────────────────────────────────╯
 ```
@@ -74,13 +74,25 @@ Badges: `● shipping`, `◐ validating`, `⛔ blocked`, `⚑ decision` /
 `✓ done` / `✓ landed`, `· queued`.
 Live state comes from `herdr agent list`; activity and review state come from
 Firstmate's bearings snapshot and the home's `state/<task>.status` tail.
-While an agent is **shipping** or **blocked**, the **doing/status** line carries
-total run time and token use in the same style as Herdr's agent sidebar (wall
-time since task spawn when available; tokens from detection or cumulative Pi
-session usage). A `doing` value that only repeats the badge (`validating`,
-`validating: …`) or the generic `harness busy …` line is dropped, so the row
-shows the totals alone; a `doing` that adds real detail keeps it before the
-totals.
+While an agent is **shipping**, **validating**, or **blocked**, the
+**doing/status** line carries total run time and total token use in the same
+style as Herdr's agent sidebar (wall time since task spawn when available;
+tokens from detection or cumulative Pi session usage). A `doing` value that
+only repeats the badge (`validating`, `validating: …`) or the generic
+`harness busy …` line is dropped, so the row shows the totals alone; a `doing`
+that adds real detail keeps it before the totals. Validating and blocked rows
+also carry the thinking effort when the row has room
+(`9m 59s · ↓ 55.5k tokens · xhigh`).
+
+## Controls
+
+The footer shows one entry point: `? help` - click it or press `?`. The help
+modal lists every binding: `←→` / `h l` move between columns, `↑↓` / `j k`
+move between cards, `pgup`/`pgdn` or the wheel scroll a column, clicking a
+crew tab switches mate, `enter` or a click opens a Captain's Call ticket,
+`o` opens the selected agent pane, `1-9` / `tab` switch crew
+(All = fleet), `L` toggles the Landed column, `r` refreshes, and `q` quits.
+`esc` or `?` closes the modal, and a click outside it closes it too.
 
 ## Answering a Captain's Call ticket
 

@@ -48,7 +48,7 @@ def test_card_run_stats_suffix():
     card.run_elapsed = "4m 2s"
     card.run_tokens = "12.1k"
     suffix = flow.UI.card_run_stats_suffix(card)
-    assert suffix == " (4m 2s · ↓ 12.1k tok)"
+    assert suffix == "4m 2s · ↓ 12.1k tokens"
 
 
 def test_card_status_line_appends_stats_to_doing():
@@ -58,7 +58,7 @@ def test_card_status_line_appends_stats_to_doing():
     card.run_elapsed = "9m 59s"
     card.run_tokens = "55.5k"
     line = flow.UI.card_status_line(card, 80)
-    assert line == "editing auth/client.rs (9m 59s · ↓ 55.5k tok)"
+    assert line == "editing auth/client.rs · 9m 59s · ↓ 55.5k tokens"
 
 
 def test_card_status_line_drops_state_that_repeats_the_badge():
@@ -68,7 +68,7 @@ def test_card_status_line_drops_state_that_repeats_the_badge():
     card.run_elapsed = "3m 45s"
     card.run_tokens = "75"
     line = flow.UI.card_status_line(card, 80)
-    assert line == "(3m 45s · ↓ 75 tok)"
+    assert line == "3m 45s · ↓ 75 tokens"
 
 
 def test_card_status_line_drops_harness_busy_noise():
@@ -78,7 +78,35 @@ def test_card_status_line_drops_harness_busy_noise():
     card.run_elapsed = "9m 59s"
     card.run_tokens = "55.5k"
     line = flow.UI.card_status_line(card, 80)
-    assert line == "(9m 59s · ↓ 55.5k tok)"
+    assert line == "9m 59s · ↓ 55.5k tokens"
+
+
+def test_card_status_line_shows_thinking_for_validating_and_blocked():
+    card = flow.Card()
+    card.badge = "◐ validating"
+    card.doing = "validating: e2e payments"
+    card.effort = "xhigh"
+    card.run_elapsed = "3m 45s"
+    card.run_tokens = "75"
+    assert flow.UI.card_status_line(card, 80) == "3m 45s · ↓ 75 tokens · xhigh"
+    card.badge = "⛔ blocked"
+    card.doing = ""
+    card.status_text = ""
+    card.run_elapsed = "18m 2s"
+    card.run_tokens = "220k"
+    assert flow.UI.card_status_line(card, 80) == "18m 2s · ↓ 220k tokens · xhigh"
+
+
+def test_card_status_line_keeps_effort_only_when_it_fits():
+    card = flow.Card()
+    card.badge = "⛔ blocked"
+    card.doing = ""
+    card.status_text = ""
+    card.effort = "xhigh"
+    card.run_elapsed = "18m 2s"
+    card.run_tokens = "220k"
+    assert flow.UI.card_status_line(card, 29) == "18m 2s · ↓ 220k tokens"
+    assert flow.UI.card_status_line(card, 31) == "18m 2s · ↓ 220k tokens · xhigh"
 
 
 def test_card_status_line_empty_without_status_or_stats():
