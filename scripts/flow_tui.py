@@ -4,8 +4,9 @@
 Shows every Firstmate home (captain + secondmates) as a crew tab, projected
 into five columns: Charted Next, Underway, Captain's Call, In Review, Landed.
 
-Per ticket it shows a live status badge, the agent harness, model, thinking
-effort, and (on click / Enter) focuses the Herdr pane where that ticket's
+Per ticket it shows a live status badge, run time and token use (top right,
+matching Herdr's agent sidebar when available), the agent harness, model,
+thinking effort, and (on click / Enter) focuses the Herdr pane where that ticket's
 agent runs, which selects it in the Herdr agents sidebar.
 
 Captain's Call is the one column that acts: clicking (or pressing Enter on) a
@@ -514,6 +515,183 @@ def herdr_agents() -> tuple[dict[str, dict], dict[str, dict]]:
         except Exception:
             pass
     return agents, panes
+
+
+# Live run stats (Herdr sidebar-style elapsed + token use), cached per pane.
+_AGENT_STATS_TTL = max(1.0, min(30.0, _float(os.environ.get("FM_FLOW_AGENT_STATS_SECS"), TICK_SECS)))
+_AGENT_STATS_CACHE: dict[str, tuple[float, str, str]] = {}
+_RUN_STATS_HERDR_RE = re.compile(
+    r"(?:Herding|Working|Running|Thinking)[^\n]{0,40}?"
+    r"\(([^)·]+)\s*·\s*↓?\s*([\d.]+[kKmM]?)\s*tokens?\)",
+    re.I,
+)
+_RUN_STATS_INLINE_RE = re.compile(
+    r"(\d+(?:m\s+\d+)?s|\d+h\s+\d+m(?:\s+\d+s)?|\d+m\s+\d+s)\s*·\s*↓?\s*([\d.]+[kKmM]?)\s*tokens?",
+    re.I,
+)
+_PI_FOOTER_TOKENS_RE = re.compile(r"↑[\d.]+[kKmM]?\s*↓([\d.]+[kKmM]?)\b")
+_SESSION_TAIL_BYTES = 512_000
+
+
+def _format_elapsed(seconds: float) -> str:
+    s = int(max(0, seconds))
+    if s >= 3600:
+        h, rem = divmod(s, 3600)
+        m, sec = divmod(rem, 60)
+        if sec:
+            return f"{h}h {m}m {sec}s"
+        return f"{h}h {m}m"
+    if s >= 60:
+        m, sec = divmod(s, 60)
+        return f"{m}m {sec}s"
+    return f"{s}s"
+
+
+def _format_token_count(total: int) -> str:
+    if total >= 1_000_000:
+        text = f"{total / 1_000_000:.1f}M"
+    elif total >= 1000:
+        text = f"{total / 1000:.1f}k"
+    else:
+        return str(total)
+    return text.replace(".0M", "M").replace(".0k", "k")
+
+
+def _normalize_token_display(raw: str) -> str:
+    raw = raw.strip()
+    if not raw:
+        return ""
+    return raw if raw.lower().endswith(("k", "m")) else raw
+
+
+def parse_run_stats_from_detection(text: str) -> tuple[str, str]:
+    """Return (elapsed, tokens) parsed from a Herdr detection buffer."""
+    if not text:
+        return "", ""
+    for pattern in (_RUN_STATS_HERDR_RE, _RUN_STATS_INLINE_RE):
+        m = pattern.search(text)
+        if m:
+            elapsed = m.group(1).strip()
+            tokens = _normalize_token_display(m.group(2))
+            return elapsed, tokens
+    m = _PI_FOOTER_TOKENS_RE.search(text)
+    if m:
+        return "", _normalize_token_display(m.group(1))
+    return "", ""
+
+
+def _parse_iso_ts(value: str) -> float:
+    if not value:
+        return 0.0
+    value = value.strip()
+    try:
+        if value.endswith("Z"):
+            value = value[:-1] + "+00:00"
+        from datetime import datetime
+
+        return datetime.fromisoformat(value).timestamp()
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+
+
+def pi_session_run_stats(session_path: str) -> tuple[str, str]:
+    """Elapsed since the latest user turn + cumulative tokens from a Pi session."""
+    if not session_path or not os.path.isfile(session_path):
+        return "", ""
+    try:
+        size = os.path.getsize(session_path)
+        with open(session_path, errors="replace") as fh:
+            if size > _SESSION_TAIL_BYTES:
+                fh.seek(size - _SESSION_TAIL_BYTES)
+                fh.readline()
+            blob = fh.read()
+    except OSError:
+        return "", ""
+    tokens = 0
+    last_user_ts = 0.0
+    for line in reversed(blob.splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        msg = obj.get("message") if isinstance(obj, dict) else None
+        if not isinstance(msg, dict):
+            continue
+        usage = msg.get("usage")
+        if isinstance(usage, dict) and not tokens:
+            total = _int(usage.get("totalTokens"))
+            if total > 0:
+                tokens = total
+        if msg.get("role") == "user" and not last_user_ts:
+            ts = _parse_iso_ts(str(obj.get("timestamp") or msg.get("timestamp") or ""))
+            if ts:
+                last_user_ts = ts
+        if tokens and last_user_ts:
+            break
+    elapsed = ""
+    if last_user_ts:
+        elapsed = _format_elapsed(time.time() - last_user_ts)
+    token_text = _format_token_count(tokens) if tokens else ""
+    return elapsed, token_text
+
+
+def _herdr_detection_text(pane_id: str) -> str:
+    if not pane_id or not HERDR_BIN:
+        return ""
+    out = _run(
+        [HERDR_BIN, "agent", "read", pane_id, "--source", "detection", "--lines", "30", "--format", "text"],
+        timeout=4.0,
+    )
+    return out or ""
+
+
+def agent_run_stats(pane_id: str, agent_info: dict | None) -> tuple[str, str]:
+    """Best-effort elapsed + token display for one agent pane."""
+    if not pane_id:
+        return "", ""
+    now = time.time()
+    cached = _AGENT_STATS_CACHE.get(pane_id)
+    if cached and now - cached[0] < _AGENT_STATS_TTL:
+        return cached[1], cached[2]
+
+    elapsed, tokens = "", ""
+    detection = _herdr_detection_text(pane_id)
+    elapsed, tokens = parse_run_stats_from_detection(detection)
+
+    if not tokens or not elapsed:
+        session = (agent_info or {}).get("agent_session") or {}
+        session_path = session.get("value") if isinstance(session, dict) else ""
+        agent_kind = (agent_info or {}).get("agent") or session.get("agent") or ""
+        if agent_kind == "pi" and session_path:
+            pi_elapsed, pi_tokens = pi_session_run_stats(str(session_path))
+            elapsed = elapsed or pi_elapsed
+            tokens = tokens or pi_tokens
+
+    _AGENT_STATS_CACHE[pane_id] = (now, elapsed, tokens)
+    return elapsed, tokens
+
+
+def enrich_cards_run_stats(cols: dict[str, list[Card]], agents: dict[str, dict]) -> None:
+    """Attach live run stats to in-flight cards that map to a working agent pane."""
+    pane_stats: dict[str, tuple[str, str]] = {}
+    for cards in cols.values():
+        for card in cards:
+            if (
+                card.bucket != "landed"
+                and card.pane_id
+                and card.live_status in ("working", "blocked")
+                and card.pane_id not in pane_stats
+            ):
+                pane_stats[card.pane_id] = agent_run_stats(card.pane_id, agents.get(card.pane_id))
+    for cards in cols.values():
+        for card in cards:
+            if card.pane_id and card.live_status in ("working", "blocked"):
+                card.run_elapsed, card.run_tokens = pane_stats.get(card.pane_id, ("", ""))
+            else:
+                card.run_elapsed, card.run_tokens = "", ""
 
 
 _META_CACHE: dict[str, tuple[float, dict]] = {}
@@ -1146,6 +1324,8 @@ class Card:
         "status_text",
         "owner",
         "home_path",
+        "run_elapsed",
+        "run_tokens",
     )
 
 
@@ -1178,6 +1358,8 @@ def make_cards(
             paths.setdefault(_strip_owner(p["id"]), p)
 
     def populate(card: Card, entry: dict) -> None:
+        card.run_elapsed = ""
+        card.run_tokens = ""
         raw_id = entry.get("id") or entry.get("key") or "?"
         card.id = raw_id
         card.task = _strip_owner(raw_id)
@@ -1461,6 +1643,7 @@ class Collector(threading.Thread):
         if not raw:
             return {}, {k: [] for k, _ in COLUMNS}, {}, loading, f"bearings snapshot failed for {home.path}"
         cols, totals = make_cards(home, raw, self._meta_index, agents, panes, homes)
+        enrich_cards_run_stats(cols, agents)
         return raw, cols, totals, loading, ""
 
     def _record_home_counts(self, home: Home, cols: dict[str, list[Card]], totals: dict[str, int]) -> None:
@@ -1570,6 +1753,7 @@ class Collector(threading.Thread):
                                 cached, cached_totals = make_cards(
                                     active, raw, self._meta_index, agents, panes, homes
                                 )
+                                enrich_cards_run_stats(cached, agents)
                             else:
                                 cached, cached_totals = {k: [] for k, _ in COLUMNS}, {}
                             _debug("iter: publish cached")
@@ -1596,6 +1780,7 @@ class Collector(threading.Thread):
                             cols, totals = make_cards(
                                 active, raw, self._meta_index, agents, panes, homes
                             )
+                            enrich_cards_run_stats(cols, agents)
                         else:
                             cols, totals = {k: [] for k, _ in COLUMNS}, {}
                         self._record_home_counts(active, cols, totals)
@@ -2498,15 +2683,18 @@ class UI:
         border_c = C_TITLE if selected else C_BORDER
         cardw = max(10, colw - 1)  # one column of breathing room between cards
         inner = max(4, cardw - 4)
-        # leave a cell for the space before the dashes, so the corner always
-        # lands on the same column as the card's right border
         top_lbl = clip(card.id, max(1, inner - 1))
-        # ╭─ id ────╮ : 3 prefix + label + space + dashes + corner must equal cardw
-        top = (
-            f"\u256d\u2500 {top_lbl} "
-            + "\u2500" * max(0, inner - display_width(top_lbl) - 1)
-            + "\u256e"
-        )
+        stats_plain = self.card_run_stats_line(card)
+        left = f"\u256d\u2500 {top_lbl} "
+        if stats_plain:
+            right_plain = f" {stats_plain} \u256e"
+            stats_colored = f"{fg(C_DIM)}{stats_plain}{RESET}"
+            right_render = f" {stats_colored} \u256e"
+        else:
+            right_plain = "\u256e"
+            right_render = "\u256e"
+        dash_n = max(0, cardw - display_width(left) - display_width(right_plain))
+        top = f"{fg(border_c)}{left}{'\u2500' * dash_n}{right_render}{RESET}"
         top += " " * max(0, cardw - display_width(top))
 
         def mid(plain: str, color: int | None = None) -> str:
@@ -2539,6 +2727,20 @@ class UI:
     def card_agent_line(card: Card) -> str:
         parts = [p for p in (card.agent, card.model, card.effort) if p]
         return "\u00b7".join(parts) if parts else "no agent yet"
+
+    @staticmethod
+    def card_run_stats_line(card: Card) -> str:
+        """Herdr-style run meter: elapsed since the active turn and tokens used."""
+        elapsed = getattr(card, "run_elapsed", "") or ""
+        tokens = getattr(card, "run_tokens", "") or ""
+        if not elapsed and not tokens:
+            return ""
+        parts: list[str] = []
+        if elapsed:
+            parts.append(elapsed)
+        if tokens:
+            parts.append(f"\u2193 {tokens}")
+        return " \u00b7 ".join(parts)
 
     @staticmethod
     def card_footer_line(card: Card, crew: str = "") -> str:

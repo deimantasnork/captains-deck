@@ -60,7 +60,7 @@ when that column is visible.
 ## What each ticket shows
 
 ```text
-╭─ demo-issue-197 ───╮
+╭─ demo-issue-197 ─ 9m 59s · ↓ 55.5k ╮
 │ ◐ validating       │   live badge
 │ claude·opus·xhigh  │   harness · model · thinking effort
 │ Add retry to the…  │   title / summary / landed what
@@ -74,6 +74,9 @@ Badges: `● working`, `◐ validating`, `⛔ blocked`, `⚑ decision` /
 `✓ done` / `✓ landed`, `· queued`.
 Live state comes from `herdr agent list`; activity and review state come from
 Firstmate's bearings snapshot and the home's `state/<task>.status` tail.
+While an agent is **working** or **blocked**, the top-right of the card shows
+run time and token use in the same style as Herdr's agent sidebar (parsed from
+the pane's detection buffer, with a Pi session fallback when needed).
 
 ## Answering a Captain's Call ticket
 
