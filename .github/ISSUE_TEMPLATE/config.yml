@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Captain's Deck on Herdr plugins
+    url: https://herdr.dev/plugins/
+    about: Install and enable the plugin from the Herdr marketplace listing.

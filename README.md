@@ -8,9 +8,12 @@ Captain's Deck is a read-only **[Firstmate flow](https://github.com/kunchenguid/
 
 Source: <https://github.com/Enk1do/captains-deck>
 
-One board, every crew: the captain home plus each secondmate home appear as crew
-tabs at the top. Each tab projects that home's bearings snapshot into five fixed
-columns. Nothing is ever written back, with one deliberate exception: a
+One board, every crew: an **All** tab (first in the row) merges every captain
+and secondmate home into one view — only work that is planned or still running
+(Charted Next, Underway, Captain's Call, and Awaiting Merge). Landed rows stay
+on each mate's own tab. After **All**, the captain home plus each secondmate
+home appear as crew tabs. Each tab projects that home's bearings snapshot into
+five fixed columns. Nothing is ever written back, with one deliberate exception: a
 Captain's Call answer (see below), where the captain's own decision goes to
 Firstmate's guarded keyed-answer intake.
 
@@ -32,7 +35,9 @@ newest per home, gates/in-flight = 20). `FM_FLOW_ALL=1` requests every row.
 
 Crew tabs show a live activity dot (`●` working/blocked, `○` agent present) and
 the number of tickets on that board once it has been visited; a visited board
-with no tickets shows `(0)`.
+with no tickets shows `(0)`. **All** shows the fleet-wide planned/running count
+(captain plus every secondmate); mate tabs count every column including Landed
+when that column is visible.
 
 ## What each ticket shows
 
@@ -107,7 +112,7 @@ The board never redraws itself wholesale.
 
 | Action | What happens |
 | --- | --- |
-| Click a **crew name** (top row) | Switch instantly; cached cards paint at once, then bearings refreshes |
+| Click a **crew name** (top row) | Switch instantly; **All** loads every mate's bearings; other tabs use cached cards first, then refresh |
 | Click a **ticket** | Focus the ticket's Herdr tab/pane, which selects that agent in the Herdr agents sidebar |
 | Click a Captain's Call **ticket** | Open its decision card modal and queue the captain's answer |
 | Click a ticket with no live pane | Footer explains it, e.g. `demo-issue-198: no live pane · (no worktree yet)` |
@@ -216,6 +221,12 @@ scripts/kanban-view.sh --once --home 2ndmate-demo
 Herdr's plugin marketplace indexes public GitHub repositories tagged with the
 `herdr-plugin` topic, and this repository is listed there:
 <https://herdr.dev/plugins/>. Installation is still `herdr plugin install`.
+
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, conventions, and how to run the checks.
+
+Report bugs, ask questions, or suggest features with a [new GitHub issue](https://github.com/Enk1do/captains-deck/issues/new) (templates optional; blank issues are allowed).
 
 ## Related projects
 

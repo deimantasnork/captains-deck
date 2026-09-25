@@ -1,0 +1,54 @@
+name: Bug report
+description: Something broken or wrong in Captain's Deck
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug.
+        If you can, run the checks in [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) before opening a PR for a fix.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you expected vs what you saw.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. herdr plugin enable herdr-firstmate-flow
+        2. Open Captain's Deck ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: herdr-version
+    attributes:
+      label: Herdr version
+      placeholder: output of `herdr --version`
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Captain's Deck version
+      placeholder: from `herdr plugin list` or herdr-plugin.toml
+  - type: dropdown
+    id: homes
+    attributes:
+      label: Fleet layout
+      options:
+        - Captain home only
+        - Captain + one or more secondmates
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Terminal output, `debug_log.log` excerpts, or screenshots.
+      render: shell

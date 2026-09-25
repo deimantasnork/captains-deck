@@ -1,0 +1,29 @@
+name: Feature request
+description: Propose an improvement to Captain's Deck
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the workflow you want and why it helps captains supervising Firstmate fleets.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or gap
+      description: What is hard, missing, or confusing today?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed behavior
+      description: How should Captain's Deck behave?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other tools, Firstmate commands, or workarounds you tried.

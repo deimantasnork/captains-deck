@@ -136,6 +136,23 @@ def main() -> int:
         check(content["home_path"] == mate_home.path,
               "the dialog routes answers to the owning home")
 
+        # fleet board on captain home while the mate crew tab is active
+        mate_only_board = make_home(root, "mate-tab", label="2ndmate-demo-lane")
+        write_board(main_home, [BOARD_CARD])
+        mate_tab_card = make_card(owner="demo-lane")
+        mate_tab_content = flow.decision_card_content(
+            mate_tab_card, [main_home, mate_only_board], mate_only_board
+        )
+        check(
+            mate_tab_content["title"] == "Draft the release checklist for #29",
+            "captain fleet board is found when a mate crew tab is active",
+        )
+        check(
+            [o["value"] for o in mate_tab_content["options"]]
+            == ["hold", "drop", "reconcile"],
+            "authored options survive when only the mate tab is on screen",
+        )
+
         # main-home rows route to the active home
         main_card = make_card(owner="(main)")
         main_content = flow.decision_card_content(main_card, [main_home, mate_home], main_home)
@@ -273,6 +290,32 @@ def main() -> int:
                        "ABOUT", "DECIDE", "Hold it", "REC", "Reconcile",
                        "Queue answer", "typed note", "esc close"):
             check(needle in text, f"dialog renders {needle!r}")
+
+        long_note = "sadasdasdsds " + "asdasdasdasd" * 12
+        ui_long = flow.UI()
+        ui_long.dialog = flow.DecisionDialog(content)
+        ui_long.dialog.note = long_note
+        ui_long.dialog.focus = "note"
+        ui_long._dialog_scroll_follow = True
+        frame_long = io.StringIO()
+        old_size = flow.shutil.get_terminal_size
+
+        def _short_terminal(_fallback=(120, 40)):
+            return os.terminal_size((120, 24))
+
+        flow.shutil.get_terminal_size = _short_terminal
+        try:
+            with contextlib.redirect_stdout(frame_long):
+                ui_long.render(snap)
+        finally:
+            flow.shutil.get_terminal_size = old_size
+        long_text = ANSI.sub("", frame_long.getvalue())
+        check("sadasdasdsds" in long_text, "a long note shows wrapped text instead of one-line ellipsis")
+        check(long_text.count("asdasdasdasd") >= 2,
+              "a long note wraps across multiple card rows")
+        check(ui_long._dialog_scroll_max > 0, "a tall dialog enables vertical scroll")
+        check("pgup/pgdn or wheel scroll" in long_text and "lines " in long_text,
+              "a scrollable dialog shows range and scroll keys")
         check(text.count("\u256d") >= 5,
               "each option and the note row render as their own bordered card")
         check("2ndmate-scout (0)" in text, "a visited empty crew shows (0)")
@@ -408,6 +451,42 @@ def main() -> int:
             "captain's deck answer for demo-issue-29" in (recorded[3] if len(recorded) > 3 else ""),
             "the wake carries the captain's answer",
         )
+
+        cols = {key: [] for key, _ in flow.COLUMNS}
+        cols["charted"] = [object()]
+        cols["underway"] = [object(), object()]
+        cols["landed"] = [object()] * 6
+        totals = {"charted": 1, "underway": 2, "landed": 6}
+        total, landed = flow.board_ticket_count(cols, totals)
+        check(total == 9 and landed == 6, "board_ticket_count sums every column")
+
+        snap = flow.Snapshot()
+        snap.counts = {"crew-a": 9}
+        snap.landed_counts = {"crew-a": 6}
+        ui = flow.UI()
+        ui.show_landed = False
+        check(ui.crew_tab_count(snap, "crew-a") == 3, "hidden Landed is omitted from crew tab totals")
+        ui.show_landed = True
+        check(ui.crew_tab_count(snap, "crew-a") == 9, "visible Landed is included in crew tab totals")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = os.path.join(tmp, "plugins", "config", "herdr-firstmate-flow")
+            os.makedirs(cfg)
+            open(os.path.join(cfg, "show_landed"), "w").write("0\n")
+            old_cfg = os.environ.get("HERDR_CONFIG_DIR")
+            os.environ["HERDR_CONFIG_DIR"] = tmp
+            try:
+                ui2 = flow.UI()
+                check(not ui2.show_landed, "show_landed file 0 hides Landed on startup")
+                flow.parse_input(b"L", ui2)
+                check(ui2.show_landed, "Shift+L toggles Landed on")
+                with open(os.path.join(cfg, "show_landed")) as fh:
+                    check(fh.read().strip() == "1", "L toggle persists show_landed=1")
+            finally:
+                if old_cfg is None:
+                    os.environ.pop("HERDR_CONFIG_DIR", None)
+                else:
+                    os.environ["HERDR_CONFIG_DIR"] = old_cfg
 
     if FAILURES:
         print(f"\n{len(FAILURES)} check(s) failed")
