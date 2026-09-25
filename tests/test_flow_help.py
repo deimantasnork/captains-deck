@@ -45,9 +45,26 @@ def test_help_owns_keys_while_open():
 def test_footer_hint_click_opens_help():
     ui = flow.UI()
     ui.height = 40
-    ui.help_region = (1, 7)
+    ui.footer_hits = [(1, 7, "help")]
     ui.click(2, 39, 0)
     assert ui.help is True
+
+
+def test_footer_actions_route_landed_and_refresh():
+    ui = flow.UI()
+    ui.height = 40
+    calls: list[str] = []
+    ui.toggle_landed = lambda: calls.append("landed")  # type: ignore[method-assign]
+    ui.collector.refresh_now = lambda: calls.append("refresh")  # type: ignore[method-assign]
+    ui.footer_hits = [(1, 7, "help"), (10, 30, "landed"), (33, 52, "refresh")]
+    ui.click(12, 39, 0)
+    ui.click(35, 39, 0)
+    assert calls == ["landed", "refresh"]
+
+
+def test_footer_shows_the_quick_actions():
+    labels = [label for label, _ in flow._FOOTER_HINTS]
+    assert labels == ["? help", "L - Show/Hide Landed", "r - Refresh board"]
 
 
 def test_click_outside_closes_help():
@@ -67,6 +84,6 @@ def test_render_help_lists_the_footer_commands():
     assert "Help" in text
     assert "move between columns" in text
     assert "open the selected agent pane" in text
-    assert "toggle the Landed column" in text
+    assert "show/hide Landed" in text
     assert "quit" in text
     assert ui.help_box is not None

@@ -86,13 +86,15 @@ also carry the thinking effort when the row has room
 
 ## Controls
 
-The footer shows one entry point: `? help` - click it or press `?`. The help
-modal lists every binding: `←→` / `h l` move between columns, `↑↓` / `j k`
-move between cards, `pgup`/`pgdn` or the wheel scroll a column, clicking a
-crew tab switches mate, `enter` or a click opens a Captain's Call ticket,
-`o` opens the selected agent pane, `1-9` / `tab` switch crew
-(All = fleet), `L` toggles the Landed column, `r` refreshes, and `q` quits.
-`esc` or `?` closes the modal, and a click outside it closes it too.
+The footer shows the frequent actions - `? help`, `L - Show/Hide Landed`, and
+`r - Refresh board` - and each one is clickable. The help modal (click
+`? help` or press `?`) lists every binding: `←→` / `h l` move between columns,
+`↑↓` / `j k` move between cards, `pgup`/`pgdn` or the wheel scroll a column,
+clicking a crew tab switches mate, `enter` or a click opens a Captain's Call
+ticket, `o` opens the selected agent pane, `1-9` / `tab` switch crew
+(All = fleet), `L` shows or hides the Landed column, `r` refreshes the board,
+and `q` quits. `esc` or `?` closes the modal, and a click outside it closes it
+too.
 
 ## Answering a Captain's Call ticket
 

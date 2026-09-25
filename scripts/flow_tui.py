@@ -53,8 +53,12 @@ COLUMNS = [
 # answer intake owns (bin/fm-captain-hold.sh answers). This is a channel, not a
 # decision-maker: it never resolves a task itself, and the reserved `reconcile`
 # value goes to the separate reconcile-request intake, never to `answers`.
-# Footer entry point for the keybinding help modal (click it or press ?).
-_HELP_HINT = "? help"
+# Footer hints: clickable quick actions on the bottom line (label, action).
+_FOOTER_HINTS = (
+    ("? help", "help"),
+    ("L - Show/Hide Landed", "landed"),
+    ("r - Refresh board", "refresh"),
+)
 
 DECISION_SOURCE_ID = "herdr-firstmate-flow"
 DECISION_SOURCE = "herdr-firstmate-flow captain's deck"
@@ -1971,7 +1975,7 @@ class UI:
         self._dialog_scroll_follow = False
         self.help = False
         self.help_box: tuple[int, int, int, int] | None = None
-        self.help_region: tuple[int, int] | None = None
+        self.footer_hits: list[tuple[int, int, str]] = []
 
     # -- helpers ------------------------------------------------------------
     def say(self, msg: str) -> None:
@@ -2268,13 +2272,17 @@ class UI:
                 ci = min(len(self.columns) - 1, max(0, x // max(1, self.colw + 1)))
                 self.scroll_by(self.columns[ci][0], delta)
             return
-        if (
-            self.help_region is not None
-            and y == self.height - 1
-            and self.help_region[0] <= x < self.help_region[1]
-        ):
-            self.open_help()
-            return
+        if y == self.height - 1:
+            for x1, x2, action in self.footer_hits:
+                if x1 <= x < x2:
+                    if action == "help":
+                        self.open_help()
+                    elif action == "landed":
+                        self.toggle_landed()
+                    elif action == "refresh":
+                        self.collector.refresh_now()
+                        self.say("refreshing\u2026")
+                    return
         for x1, x2, label in self.tab_regions:
             if y == 0 and x1 <= x < x2:
                 self.switch_home(label)
@@ -2422,14 +2430,19 @@ class UI:
         # footer
         while len(lines) < h - 1:
             lines.append("")
-        self.help_region = None
-        lines.append(f"{fg(C_DIM)}{clip(' ' + _HELP_HINT, w)}{RESET}")
+        self.footer_hits = []
+        footer_text = " " + " \u00b7 ".join(label for label, _ in _FOOTER_HINTS)
+        lines.append(f"{fg(C_DIM)}{clip(footer_text, w)}{RESET}")
         if self.flash and time.time() - self.flash_at < 6:
             lines[-1] = f"{fg(C_WARN)}{clip(self.flash, w)}{RESET}"
         elif snap.error:
             lines[-1] = f"{fg(C_BAD)}{clip(snap.error, w)}{RESET}"
         else:
-            self.help_region = (1, 1 + display_width(_HELP_HINT))
+            x = 1
+            for label, action in _FOOTER_HINTS:
+                end = x + display_width(label)
+                self.footer_hits.append((x, end, action))
+                x = end + display_width(" \u00b7 ")
 
         if self.dialog is not None:
             self.render_dialog(lines, w, h)
@@ -2743,7 +2756,7 @@ class UI:
         ("enter / click", "open a Captain's Call ticket"),
         ("o", "open the selected agent pane"),
         ("1-9 / tab", "switch crew (All = fleet)"),
-        ("L", "toggle the Landed column"),
+        ("L", "show/hide Landed"),
         ("r", "refresh the board"),
         ("? / esc", "close this help"),
         ("q", "quit"),
