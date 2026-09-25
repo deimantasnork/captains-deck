@@ -43,7 +43,7 @@ def test_fixture_snapshot_projects_into_columns():
     assert totals["landed"] == 1
 
 
-def test_fixture_badges_meta_and_why_row():
+def test_fixture_badges_and_meta():
     cols, _ = _cards()
     gates = {c.task: c for c in cols["charted"]}
     assert gates["demo-queued-1"].badge == "\u00b7 queued"
@@ -54,7 +54,7 @@ def test_fixture_badges_meta_and_why_row():
     assert (work.agent, work.model, work.effort) == ("claude", "opus", "xhigh")
     assert work.spawn_epoch > 0
     assert work.worktree == "/tmp/treehouse/demo/1/demo-work-1"
-    assert flow.UI.card_why_line(work) == ""  # "harness busy ..." repeats the badge
+    assert work.doing == "harness busy (claude-hook)"
     assert cols["awaiting_merge"][0].badge == "\u25cd awaits merge"
     assert cols["landed"][0].badge == "\u2713 landed"
     assert cols["landed"][0].artifact == "pull/412-feat-oauth-retry"
