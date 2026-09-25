@@ -134,9 +134,9 @@ newest per home, gates/in-flight = 20). `FM_FLOW_ALL=1` requests every row.
 
 Crew tabs show a live activity dot (`●` working/blocked, `○` agent present) and
 the number of tickets on that board once it has been visited; a visited board
-with no tickets shows `(0)`. **All** shows the fleet-wide planned/running count
-(captain plus every secondmate); mate tabs count every column including Landed
-when that column is visible.
+with no tickets shows `(0)`. **All** shows the visible fleet-wide
+planned/running count after mirrored rows are folded; mate tabs count every
+column including Landed when that column is visible.
 
 ## What each ticket shows
 
