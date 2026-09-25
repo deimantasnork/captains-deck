@@ -4,8 +4,7 @@
 Shows every Firstmate home (captain + secondmates) as a crew tab, projected
 into five columns: Charted Next, Underway, Captain's Call, In Review, Landed.
 
-Per ticket it shows a live status badge, run time and token use (top right,
-matching Herdr's agent sidebar when available), the agent harness, model,
+Per ticket it shows a live status badge, the agent harness, model,
 thinking effort, and (on click / Enter) focuses the Herdr pane where that ticket's
 agent runs, which selects it in the Herdr agents sidebar.
 
@@ -564,6 +563,32 @@ def _normalize_token_display(raw: str) -> str:
     return raw if raw.lower().endswith(("k", "m")) else raw
 
 
+def parse_spawn_gen_epoch(spawn_gen: str) -> float:
+    """Epoch seconds from a Firstmate ``spawn_gen`` (``s<unix>.…``)."""
+    if not spawn_gen:
+        return 0.0
+    raw = spawn_gen.strip()
+    if raw.startswith("s"):
+        raw = raw[1:]
+    head = raw.split(".", 1)[0]
+    try:
+        return float(head)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _usage_total_tokens(usage: dict) -> int:
+    total = _int(usage.get("totalTokens"))
+    if total > 0:
+        return total
+    return (
+        _int(usage.get("input"))
+        + _int(usage.get("output"))
+        + _int(usage.get("cacheRead"))
+        + _int(usage.get("cacheWrite"))
+    )
+
+
 def parse_run_stats_from_detection(text: str) -> tuple[str, str]:
     """Return (elapsed, tokens) parsed from a Herdr detection buffer."""
     if not text:
@@ -595,7 +620,7 @@ def _parse_iso_ts(value: str) -> float:
 
 
 def pi_session_run_stats(session_path: str) -> tuple[str, str]:
-    """Elapsed since the latest user turn + cumulative tokens from a Pi session."""
+    """Total session wall time + cumulative tokens from a Pi session file."""
     if not session_path or not os.path.isfile(session_path):
         return "", ""
     try:
@@ -608,8 +633,8 @@ def pi_session_run_stats(session_path: str) -> tuple[str, str]:
     except OSError:
         return "", ""
     tokens = 0
-    last_user_ts = 0.0
-    for line in reversed(blob.splitlines()):
+    first_ts = 0.0
+    for line in blob.splitlines():
         line = line.strip()
         if not line:
             continue
@@ -617,23 +642,22 @@ def pi_session_run_stats(session_path: str) -> tuple[str, str]:
             obj = json.loads(line)
         except json.JSONDecodeError:
             continue
-        msg = obj.get("message") if isinstance(obj, dict) else None
+        if not isinstance(obj, dict):
+            continue
+        ts = _parse_iso_ts(str(obj.get("timestamp") or ""))
+        if ts and (not first_ts or ts < first_ts):
+            first_ts = ts
+        msg = obj.get("message")
         if not isinstance(msg, dict):
             continue
+        if not ts:
+            ts = _parse_iso_ts(str(msg.get("timestamp") or ""))
+            if ts and (not first_ts or ts < first_ts):
+                first_ts = ts
         usage = msg.get("usage")
-        if isinstance(usage, dict) and not tokens:
-            total = _int(usage.get("totalTokens"))
-            if total > 0:
-                tokens = total
-        if msg.get("role") == "user" and not last_user_ts:
-            ts = _parse_iso_ts(str(obj.get("timestamp") or msg.get("timestamp") or ""))
-            if ts:
-                last_user_ts = ts
-        if tokens and last_user_ts:
-            break
-    elapsed = ""
-    if last_user_ts:
-        elapsed = _format_elapsed(time.time() - last_user_ts)
+        if isinstance(usage, dict):
+            tokens += _usage_total_tokens(usage)
+    elapsed = _format_elapsed(time.time() - first_ts) if first_ts else ""
     token_text = _format_token_count(tokens) if tokens else ""
     return elapsed, token_text
 
@@ -686,10 +710,15 @@ def enrich_cards_run_stats(cols: dict[str, list[Card]], agents: dict[str, dict])
                 and card.pane_id not in pane_stats
             ):
                 pane_stats[card.pane_id] = agent_run_stats(card.pane_id, agents.get(card.pane_id))
+    now = time.time()
     for cards in cols.values():
         for card in cards:
             if card.pane_id and card.live_status in ("working", "blocked"):
-                card.run_elapsed, card.run_tokens = pane_stats.get(card.pane_id, ("", ""))
+                elapsed, tokens = pane_stats.get(card.pane_id, ("", ""))
+                spawn_epoch = getattr(card, "spawn_epoch", 0.0) or 0.0
+                if spawn_epoch > 0:
+                    elapsed = _format_elapsed(now - spawn_epoch)
+                card.run_elapsed, card.run_tokens = elapsed, tokens
             else:
                 card.run_elapsed, card.run_tokens = "", ""
 
@@ -1326,6 +1355,7 @@ class Card:
         "home_path",
         "run_elapsed",
         "run_tokens",
+        "spawn_epoch",
     )
 
 
@@ -1360,6 +1390,7 @@ def make_cards(
     def populate(card: Card, entry: dict) -> None:
         card.run_elapsed = ""
         card.run_tokens = ""
+        card.spawn_epoch = 0.0
         raw_id = entry.get("id") or entry.get("key") or "?"
         card.id = raw_id
         card.task = _strip_owner(raw_id)
@@ -1379,6 +1410,7 @@ def make_cards(
         card.effort = meta.get("effort", "")
         card.mode = meta.get("mode", "")
         card.branch = meta.get("branch", "")
+        card.spawn_epoch = parse_spawn_gen_epoch(meta.get("spawn_gen", ""))
         if not card.worktree:
             card.worktree = meta.get("worktree", "")
         card.pane_id = meta.get("herdr_pane_id", "")
@@ -2684,17 +2716,10 @@ class UI:
         cardw = max(10, colw - 1)  # one column of breathing room between cards
         inner = max(4, cardw - 4)
         top_lbl = clip(card.id, max(1, inner - 1))
-        stats_plain = self.card_run_stats_line(card)
         left = f"\u256d\u2500 {top_lbl} "
-        if stats_plain:
-            right_plain = f" {stats_plain} \u256e"
-            stats_colored = f"{fg(C_DIM)}{stats_plain}{RESET}"
-            right_render = f" {stats_colored} \u256e"
-        else:
-            right_plain = "\u256e"
-            right_render = "\u256e"
+        right_plain = "\u256e"
         dash_n = max(0, cardw - display_width(left) - display_width(right_plain))
-        top = f"{fg(border_c)}{left}{'\u2500' * dash_n}{right_render}{RESET}"
+        top = f"{fg(border_c)}{left}{'\u2500' * dash_n}{right_plain}{RESET}"
         top += " " * max(0, cardw - display_width(top))
 
         def mid(plain: str, color: int | None = None) -> str:
@@ -2708,7 +2733,7 @@ class UI:
             mid(card.badge, card.badge_color),
             mid(self.card_agent_line(card), C_DIM),
             mid(card.title or card.task),
-            mid(card.doing, C_WARN),
+            mid(self.card_status_line(card, inner), C_WARN),
             mid(
                 self.card_footer_line(
                     card,
@@ -2729,8 +2754,8 @@ class UI:
         return "\u00b7".join(parts) if parts else "no agent yet"
 
     @staticmethod
-    def card_run_stats_line(card: Card) -> str:
-        """Herdr-style run meter: elapsed since the active turn and tokens used."""
+    def card_run_stats_suffix(card: Card) -> str:
+        """Herdr-style ``(9m 59s · ↓ 55.5k tokens)`` suffix for the status line."""
         elapsed = getattr(card, "run_elapsed", "") or ""
         tokens = getattr(card, "run_tokens", "") or ""
         if not elapsed and not tokens:
@@ -2739,8 +2764,26 @@ class UI:
         if elapsed:
             parts.append(elapsed)
         if tokens:
-            parts.append(f"\u2193 {tokens}")
-        return " \u00b7 ".join(parts)
+            parts.append(f"\u2193 {tokens} tokens")
+        return f" ({' \u00b7 '.join(parts)})"
+
+    @staticmethod
+    def card_run_stats_line(card: Card) -> str:
+        """Legacy helper; prefer ``card_run_stats_suffix`` on the status row."""
+        suffix = UI.card_run_stats_suffix(card)
+        return suffix.strip(" ()") if suffix else ""
+
+    @staticmethod
+    def card_status_line(card: Card, inner: int) -> str:
+        """Ticket status (``doing`` / status tail) plus total run time and tokens."""
+        base = (card.doing or "").strip()
+        if not base:
+            base = (card.status_text or "").strip()
+        suffix = UI.card_run_stats_suffix(card)
+        if not base and not suffix:
+            return ""
+        plain = f"{base}{suffix}" if base else suffix.strip()
+        return clip(plain, inner)
 
     @staticmethod
     def card_footer_line(card: Card, crew: str = "") -> str:

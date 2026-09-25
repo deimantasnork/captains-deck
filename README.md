@@ -60,11 +60,12 @@ when that column is visible.
 ## What each ticket shows
 
 ```text
-╭─ demo-issue-197 ─ 9m 59s · ↓ 55.5k ╮
+╭─ demo-issue-197 ───────────────────╮
 │ ◐ validating       │   live badge
 │ claude·opus·xhigh  │   harness · model · thinking effort
 │ Add retry to the…  │   title / summary / landed what
-│ validating (runni… │   current activity (bearings "doing", gate reason)
+│ Validating (9m 59s │   doing/status + total run time · tokens
+│  · ↓ 55.5k tokens) │
 │ ⌸ 4/my-app-feat…   │   worktree (or ↗ PR artifact for landed)
 ╰────────────────────╯
 ```
@@ -74,9 +75,10 @@ Badges: `● working`, `◐ validating`, `⛔ blocked`, `⚑ decision` /
 `✓ done` / `✓ landed`, `· queued`.
 Live state comes from `herdr agent list`; activity and review state come from
 Firstmate's bearings snapshot and the home's `state/<task>.status` tail.
-While an agent is **working** or **blocked**, the top-right of the card shows
-run time and token use in the same style as Herdr's agent sidebar (parsed from
-the pane's detection buffer, with a Pi session fallback when needed).
+While an agent is **working** or **blocked**, the **doing/status** line appends
+total run time and token use in the same style as Herdr's agent sidebar
+(wall time since task spawn when available; tokens from detection or cumulative
+Pi session usage).
 
 ## Answering a Captain's Call ticket
 
