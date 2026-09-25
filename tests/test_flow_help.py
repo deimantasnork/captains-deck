@@ -37,7 +37,7 @@ def test_help_owns_keys_while_open():
     flow.parse_input(b"?", ui)
     flow.parse_input(b"o", ui)  # would open the agent pane otherwise
     assert ui.help is True
-    flow.parse_input(b"q")  # closes the help instead of quitting
+    flow.parse_input(b"q", ui)  # closes the help instead of quitting
     assert ui.help is False
     assert ui.quitting is False
 
