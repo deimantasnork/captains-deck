@@ -5,10 +5,10 @@ Shows every Firstmate home (captain + secondmates) as a crew tab, projected
 into five columns: Charted Next, Underway, Captain's Call, In Review, Landed.
 
 Per ticket it shows a live status badge (carrying total run time and tokens
-while the agent is working or blocked), the title, an optional why row, the
-agent harness, model, and thinking effort, and the worktree jump target.
-Clicking a ticket (or pressing Enter) focuses the Herdr pane where that
-ticket's agent runs, which selects it in the Herdr agents sidebar.
+while the agent is working or blocked), the agent harness, model, and thinking
+effort, the title, and the worktree jump target. Clicking a ticket (or pressing
+Enter) focuses the Herdr pane where that ticket's agent runs, which selects it
+in the Herdr agents sidebar.
 
 Captain's Call is the one column that acts: clicking (or pressing Enter on) a
 ticket opens its composed board card as a decision dialog, and the captain's
@@ -50,10 +50,10 @@ COLUMNS = [
 ]
 
 # One board card reserves a fixed vertical slot so wheel scrolling stays
-# smooth. The tallest card is CARD_MAX_H rows: two borders plus a badge, title,
-# optional why row, and one or two meta rows.
+# smooth. Every card is CARD_MAX_H rows: two borders plus the badge, agent,
+# title, and footer rows.
 CARD_SLOT_H = 8
-CARD_MAX_H = 7
+CARD_MAX_H = 6
 
 # The Lavish bearings board composes every open call into a card with ABOUT /
 # DECIDE context and authored options. The captain's deck mirrors that card in a
@@ -2780,13 +2780,12 @@ class UI:
             if snap is not None and snap.home is not None and is_aggregate_home(snap.home)
             else ""
         )
-        why = self.card_why_line(card)
         lines = [
             f"{fg(border_c)}{top}{RESET}",
             mid(self.card_badge_line(card, inner), card.badge_color),
+            mid(self.card_agent_line(card), C_DIM),
             mid(card.title or card.task),
-            *([mid(why, C_DIM)] if why else []),
-            *[mid(row, C_DIM) for row in self.card_meta_lines(card, crew, inner)],
+            mid(self.card_footer_line(card, crew), C_DIM),
             f"{fg(border_c)}{'\u2570' + '\u2500' * (cardw - 2) + '\u256f'}{RESET}",
         ]
         # pad each row to the full column width so the separator keeps a gap
@@ -2796,45 +2795,6 @@ class UI:
     def card_agent_line(card: Card) -> str:
         parts = [p for p in (card.agent, card.model, card.effort) if p]
         return "\u00b7".join(parts) if parts else "no agent yet"
-
-    @staticmethod
-    def card_why_line(card: Card) -> str:
-        """Context under the title, only when it adds something the badge does not.
-
-        Gate reasons and decision prompts lead; an underway card shows its
-        ``doing`` tail unless it just repeats the badge or says what every live
-        pane says (``harness busy ...``).
-        """
-        if card.bucket == "landed":
-            return ""
-        label = badge_label_from_badge(card.badge or "")
-        doing = " ".join((card.doing or "").split())
-        low = doing.lower()
-        if low in ("", "-") or low.startswith("harness busy") or low == label:
-            doing = ""
-        if doing:
-            return doing
-        blocked_by = (card.blocked_by or "").strip()
-        if blocked_by and blocked_by != "-":
-            return f"blocked by {blocked_by}"
-        return ""
-
-    @staticmethod
-    def card_meta_lines(card: Card, crew: str = "", inner: int = 0) -> list[str]:
-        """Dim footer rows: harness/model/effort plus the jump target.
-
-        One merged row (``claude\u00b7opus\u00b7xhigh \u00b7 \u2338 4/demo``) when it fits the
-        card, otherwise two rows so neither the harness nor the jump is lost.
-        """
-        footer = UI.card_footer_line(card, crew)
-        agent = UI.card_agent_line(card)
-        has_agent = bool(card.agent or card.model or card.effort)
-        if has_agent and footer:
-            merged = f"{agent} \u00b7 {footer}"
-            if not inner or display_width(merged) <= inner:
-                return [merged]
-            return [agent, footer]
-        return [footer or agent]
 
     @staticmethod
     def card_badge_line(card: Card, inner: int) -> str:

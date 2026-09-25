@@ -79,28 +79,6 @@ def test_card_badge_line_without_stats_uses_symbol_badge():
     assert line == "\u00b7 queued"
 
 
-def test_parse_spawn_gen_epoch():
-    assert flow.parse_spawn_gen_epoch("s1790288967.25969.11281") == 1790288967.0
-    assert flow.parse_spawn_gen_epoch("") == 0.0
-
-
-def test_pi_session_run_stats_sums_tokens():
-    import tempfile
-
-    with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as fh:
-        fh.write(
-            '{"timestamp":"2026-09-25T10:00:00+00:00","message":{"role":"assistant","usage":{"input":100,"output":50}}}\n'
-            '{"timestamp":"2026-09-25T10:05:00+00:00","message":{"role":"assistant","usage":{"input":200,"output":80}}}\n'
-        )
-        path = fh.name
-    try:
-        elapsed, tokens = flow.pi_session_run_stats(path)
-        assert tokens == "430"
-        assert elapsed.endswith("s") or "m" in elapsed
-    finally:
-        Path(path).unlink(missing_ok=True)
-
-
 def test_card_badge_line_degrades_on_narrow_cards():
     card = flow.Card()
     card.badge = "\u25cf shipping"
@@ -131,46 +109,23 @@ def test_card_badge_line_blocked_keeps_word_at_deck_width():
     assert flow.UI.card_badge_line(card, 24) == "blocked \u25cf 18m2s \u25cf 220k"
 
 
-def test_card_why_line_skips_badge_repeats_and_harness_noise():
-    card = flow.Card()
-    card.bucket = "underway"
-    card.badge = "\u25d0 validating"
-    card.blocked_by = ""
-    card.doing = "validating"
-    assert flow.UI.card_why_line(card) == ""
-    card.doing = "harness busy (claude-hook)"
-    assert flow.UI.card_why_line(card) == ""
-    card.doing = "validating: e2e payments"
-    assert flow.UI.card_why_line(card) == "validating: e2e payments"
+def test_parse_spawn_gen_epoch():
+    assert flow.parse_spawn_gen_epoch("s1790288967.25969.11281") == 1790288967.0
+    assert flow.parse_spawn_gen_epoch("") == 0.0
 
 
-def test_card_why_line_prefers_reason_then_blocked_by():
-    card = flow.Card()
-    card.bucket = "charted"
-    card.badge = "\u00b7 queued"
-    card.doing = "waiting for captain slot"
-    assert flow.UI.card_why_line(card) == "waiting for captain slot"
-    card.doing = ""
-    card.blocked_by = "schema-migrate-3"
-    assert flow.UI.card_why_line(card) == "blocked by schema-migrate-3"
-    card.bucket = "landed"
-    assert flow.UI.card_why_line(card) == ""
+def test_pi_session_run_stats_sums_tokens():
+    import tempfile
 
-
-def test_card_meta_lines_merges_when_it_fits_and_splits_when_not():
-    card = flow.Card()
-    card.bucket = "underway"
-    card.agent = "claude"
-    card.model = "opus"
-    card.effort = "xhigh"
-    card.worktree = "/home/x/.treehouse/my-app/4/demo-issue-197"
-    assert flow.UI.card_meta_lines(card, "", 40) == ["claude\u00b7opus\u00b7xhigh \u00b7 \u2338 4/demo-issue-197"]
-    assert flow.UI.card_meta_lines(card, "", 24) == ["claude\u00b7opus\u00b7xhigh", "\u2338 4/demo-issue-197"]
-
-
-def test_card_meta_lines_drops_placeholder_agent_when_footer_exists():
-    card = flow.Card()
-    card.bucket = "charted"
-    card.worktree = ""
-    card.agent = card.model = card.effort = ""
-    assert flow.UI.card_meta_lines(card, "", 24) == ["no worktree yet"]
+    with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as fh:
+        fh.write(
+            '{"timestamp":"2026-09-25T10:00:00+00:00","message":{"role":"assistant","usage":{"input":100,"output":50}}}\n'
+            '{"timestamp":"2026-09-25T10:05:00+00:00","message":{"role":"assistant","usage":{"input":200,"output":80}}}\n'
+        )
+        path = fh.name
+    try:
+        elapsed, tokens = flow.pi_session_run_stats(path)
+        assert tokens == "430"
+        assert elapsed.endswith("s") or "m" in elapsed
+    finally:
+        Path(path).unlink(missing_ok=True)

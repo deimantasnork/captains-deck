@@ -62,21 +62,16 @@ when that column is visible.
 ```text
 ╭─ demo-issue-197 ───────────────────╮
 │ shipping ● 9min 59s ● 55.5k tok    │   live badge + run totals
-│ Add retry to the OAuth callback    │   title (or the "what" for landed)
-│ editing auth/client.rs             │   why: gate / decision / doing detail
-│ claude·opus·xhigh · ⌸ 4/my-app…    │   harness · model · effort · jump target
+│ claude·opus·xhigh                    │   harness · model · thinking effort
+│ Add retry to the OAuth callback      │   title (or the "what" for landed)
+│ ⌸ 4/my-app…                          │   worktree / PR jump target (crew on All)
 ╰────────────────────╯
 ```
 
-The card reads top to bottom: id, live badge, title, an optional why row, then
-the dim meta row. The badge carries **total wall time since the task spawned**
-and **total tokens** (Herdr detection, or cumulative Pi session usage) whenever
-the agent is `shipping` or `blocked`. The why row shows a blocked-by, a gate
-reason, the Captain's Call prompt, or a `doing` detail that says more than the
-badge, and disappears when it would only repeat it. The meta row merges the
-harness · model · thinking effort with the worktree/PR jump target (and the
-owning crew on **All**) when the card is wide enough, and splits into two rows
-when it is not.
+Every card is six rows: id, live badge, agent line, title, and the jump target.
+The badge carries **total wall time since the task spawned** and **total
+tokens** (Herdr detection, or cumulative Pi session usage) whenever the agent
+is `shipping` or `blocked`; other states keep the symbolic badge alone.
 
 Badges: `● shipping`, `◐ validating`, `⛔ blocked`, `⚑ decision` /
 `⚑ captain`, `◍ awaits merge`, `⏸ parked` / `⏸ paused`, `⛔ failed`,
