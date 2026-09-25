@@ -12,8 +12,11 @@ Captain's Call is the one column that acts: clicking (or pressing Enter on) a
 ticket opens its composed board card as a decision dialog, and the captain's
 choice is piped to firstmate's one keyed-answer intake
 (``bin/fm-captain-hold.sh answers``) - or to its reconcile-request intake for
-the reserved ``reconcile`` value. Everything else stays read-only, and no state
-beyond the screen is kept.
+the reserved ``reconcile`` value. A recorded answer also steers the owning lane
+through the parent home's inbox (``bin/fm-send.sh``); set ``FM_FLOW_WAKE=0`` to
+keep a submit to the intake alone. Reconcile binds this Deck as its captured
+source on first use, and keyed lines flatten CR/LF/TAB so card text can never
+split into a second answer row. Everything else stays read-only.
 """
 
 from __future__ import annotations
@@ -71,6 +74,13 @@ RECONCILE_OPTION = {
         "or keep it open with a note"
     ),
 }
+
+# The intake's own key bound. A key outside it is skipped there without word,
+# so the dialog refuses it visibly instead.
+KEY_RE = re.compile(r"[A-Za-z0-9._-]{1,128}")
+# CR/LF/TAB would split one keyed line into extra answer rows at the intake,
+# which sanitizes each field only after it has split stdin into rows.
+_FIELD_BREAK_RE = re.compile(r"[\r\n\t]+")
 
 RESET = "\x1b[0m"
 BOLD = "\x1b[1m"
@@ -163,6 +173,12 @@ def _float(value, default: float = 5.0) -> float:
         return default
 
 
+def _flatten_field(value) -> str:
+    """Collapse CR/LF/TAB so a title, answer or note can never become a second
+    keyed-answer row at the intake."""
+    return _FIELD_BREAK_RE.sub(" ", str(value or "")).strip()
+
+
 # Live badge/agent refresh. FM_FLOW_REFRESH_SECS is honored as a legacy alias.
 TICK_SECS = max(
     0.25,
@@ -212,6 +228,32 @@ def set_show_landed_pref(show: bool) -> None:
             fh.write("1\n" if show else "0\n")
     except OSError:
         pass
+
+
+def _config_truthy(name: str, filename: str, default: bool) -> bool:
+    """Env-first boolean, then the plugin config file, then the default."""
+    val = os.environ.get(name)
+    if val is None:
+        try:
+            with open(os.path.join(_plugin_config_dir(), filename)) as fh:
+                val = fh.read().strip()
+        except OSError:
+            val = ""
+    fallback = "1" if default else "0"
+    return (val or fallback).strip().lower() in ("1", "true", "yes", "on")
+
+
+def wake_owner_default() -> bool:
+    """Whether a recorded answer also steers the owning lane (default on).
+    FM_FLOW_WAKE=0, or wake_owner=0 in the plugin config dir, keeps a submit to
+    the intake alone."""
+    return _config_truthy("FM_FLOW_WAKE", "wake_owner", True)
+
+
+def homes_only_default() -> bool:
+    """Whether discovery is limited to FM_FLOW_HOMES / homes.conf (default
+    off: the explicit list adds homes on top of the usual scan)."""
+    return _config_truthy("FM_FLOW_HOMES_ONLY", "homes_only", False)
 
 
 def board_ticket_count(cols: dict[str, list], totals: dict[str, int]) -> tuple[int, int]:
@@ -328,6 +370,12 @@ class Home:
 
 
 def _plugin_config_dir() -> str:
+    """The plugin config dir Herdr hands plugin processes (matching
+    kanban-view.sh), with HERDR_CONFIG_DIR as the fallback for manual runs and
+    tests."""
+    plugin_dir = os.environ.get("HERDR_PLUGIN_CONFIG_DIR")
+    if plugin_dir:
+        return plugin_dir
     base = os.environ.get("HERDR_CONFIG_DIR") or os.path.expanduser("~/.config/herdr")
     return os.path.join(base, "plugins", "config", "herdr-firstmate-flow")
 
@@ -433,23 +481,30 @@ def discover_homes(verbose: bool = False) -> list[Home]:
                 label, path = item.split("=", 1)
                 explicit.append((label.strip(), os.path.expanduser(path.strip())))
 
-    single = os.environ.get("FM_HOME", "").strip()
-    if not single:
-        fm_home_file = os.path.join(_plugin_config_dir(), "fm_home")
-        try:
-            with open(fm_home_file) as fh:
-                single = fh.read().strip()
-        except OSError:
-            single = ""
-    if single:
-        candidates.append(os.path.expanduser(single))
+    # homes_only pins discovery to the explicit FM_FLOW_HOMES / homes.conf
+    # list. A bare homes_only with nothing configured falls back to the scan,
+    # so a typo cannot make the board show nothing.
+    only_explicit = bool(explicit) and homes_only_default()
+    single = ""
+    treehouse_paths: set[str] = set()
+    if not only_explicit:
+        single = os.environ.get("FM_HOME", "").strip()
+        if not single:
+            fm_home_file = os.path.join(_plugin_config_dir(), "fm_home")
+            try:
+                with open(fm_home_file) as fh:
+                    single = fh.read().strip()
+            except OSError:
+                single = ""
+        if single:
+            candidates.append(os.path.expanduser(single))
 
-    candidates.append(os.path.expanduser("~/firstmate"))
-    treehouse_paths = {
-        os.path.realpath(p)
-        for p in glob.glob(os.path.expanduser("~/.treehouse/*/*/firstmate"))
-    }
-    candidates.extend(sorted(treehouse_paths))
+        candidates.append(os.path.expanduser("~/firstmate"))
+        treehouse_paths = {
+            os.path.realpath(p)
+            for p in glob.glob(os.path.expanduser("~/.treehouse/*/*/firstmate"))
+        }
+        candidates.extend(sorted(treehouse_paths))
 
     leases = _lease_holders(os.path.expanduser("~/.treehouse"))
     pres = _presentation_labels()
@@ -1006,7 +1061,7 @@ def decision_card_for(key: str, *homes: Home | None) -> dict:
             ordered.append(home)
     # every card source is keyed by a validated slug; never build a path from
     # anything else
-    if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", key):
+    if not KEY_RE.fullmatch(key):
         return {}
     for home in ordered:
         card = _board_file_cards(
@@ -1059,7 +1114,7 @@ def resolve_owner_lane(homes: list[Home] | None, owner: str) -> tuple[Home | Non
     The parent home is the one whose state directory records the mate lane
     (state/<owner>.meta); a home-owned ``(main)`` row has no lane to steer.
     """
-    if not owner or owner == "(main)":
+    if not owner or owner == "(main)" or not KEY_RE.fullmatch(owner):
         return None, ""
     for home in homes or []:
         if os.path.isfile(os.path.join(home.path, "state", f"{owner}.meta")):
@@ -1118,13 +1173,14 @@ def decision_card_content(
         if not isinstance(opt, dict):
             continue
         value = opt.get("value")
-        if not isinstance(value, str) or not value:
+        if not isinstance(value, str) or not _flatten_field(value):
             continue
+        value = _flatten_field(value)
         options.append(
             {
                 "value": value,
-                "label": str(opt.get("label") or value),
-                "hint": str(opt.get("hint") or ""),
+                "label": _flatten_field(opt.get("label")) or value,
+                "hint": _flatten_field(opt.get("hint")),
             }
         )
     # The board's build injects the standard reconcile choice on every decision
@@ -1166,22 +1222,23 @@ def decision_card_content(
         decide = "Pick an option below, or answer in your own words."
     return {
         "key": card.task,
-        "title": title,
+        "title": _flatten_field(title),
         "type": ctype,
-        "repo": repo,
-        "about": about,
-        "decide": decide,
-        "detail": str(raw.get("detail") or ""),
+        "repo": _flatten_field(repo),
+        "about": _flatten_field(about),
+        "decide": _flatten_field(decide),
+        "detail": _flatten_field(raw.get("detail")),
         "options": options,
         "recommend": recommend if isinstance(recommend, str) else "",
         "freeform": bool(raw.get("allow_freeform")) if raw else True,
-        "freeform_hint": str(
+        "freeform_hint": _flatten_field(
             raw.get("freeform_hint") or "or answer in your own words\u2026"
         ),
         "close": raw.get("close") if raw.get("close") in ("done", "release") else "",
         "home_path": answer_home_path(card, homes, active),
         "wake_home": wake_home.path if wake_home is not None else "",
         "wake_lane": wake_lane,
+        "wake_enabled": wake_owner_default(),
     }
 
 
@@ -1204,6 +1261,7 @@ class DecisionDialog:
         "home_path",
         "wake_home",
         "wake_lane",
+        "wake_enabled",
         "cursor",
         "selected",
         "note",
@@ -1230,6 +1288,9 @@ class DecisionDialog:
         self.home_path = content["home_path"]
         self.wake_home = content["wake_home"]
         self.wake_lane = content["wake_lane"]
+        # Captured when the card opened so the footer can say what will happen;
+        # the submit itself re-reads the live setting.
+        self.wake_enabled = bool(content.get("wake_enabled", True))
         self.cursor = 0
         # The board preselects the recommended option; without one the captain
         # starts on the freeform row.
@@ -1270,16 +1331,20 @@ class DecisionDialog:
         channel has only the keyed line, so the note rides the answer and the
         captain's full words reach the durable decision.
         """
-        answer = self.display_answer()
-        line = f"{self.key}\t{answer}\t{self.title} -> {answer}"
+        answer = _flatten_field(self.display_answer())
+        line = (
+            f"{_flatten_field(self.key)}\t{answer}\t"
+            f"{_flatten_field(self.title)} -> {answer}"
+        )
         if self.close:
             line += f"\t{self.close}"
         return line
 
     def reconcile_line(self) -> str:
         """A reconcile request row: the task id and the note as provenance."""
-        note = self.note.strip()
-        return f"{self.key}\t{note}" if note else self.key
+        note = _flatten_field(self.note)
+        key = _flatten_field(self.key)
+        return f"{key}\t{note}" if note else key
 
 
 def _hold_script(home_path: str) -> str:
@@ -1344,6 +1409,9 @@ def wake_owner(dialog: DecisionDialog) -> str:
     """
     if not dialog.wake_home or not dialog.wake_lane:
         return ""
+    if not KEY_RE.fullmatch(dialog.wake_lane):
+        _debug(f"wake lane refused: {dialog.wake_lane!r}")
+        return "owner wake skipped: the lane id is malformed"
     script = os.path.join(dialog.wake_home, "bin", "fm-send.sh")
     if not os.path.isfile(script):
         return f"wake skipped: no fm-send.sh in {dialog.wake_home}"
@@ -1393,6 +1461,10 @@ def run_submit(dialog: DecisionDialog) -> tuple[bool, str]:
             f"cannot tell which home owns {dialog.key}; "
             "answer it from the Lavish board or chat"
         )
+    if not KEY_RE.fullmatch(dialog.key):
+        return False, (
+            f"refusing a malformed task key: {_flatten_field(dialog.key)[:80]!r}"
+        )
     option = dialog.selected_option()
     if option and option["value"] == "reconcile":
         ok, detail = ensure_decision_binding(dialog.home_path)
@@ -1415,7 +1487,7 @@ def run_submit(dialog: DecisionDialog) -> tuple[bool, str]:
             ["answers", "--source", DECISION_SOURCE],
             dialog.keyed_line() + "\n",
         )
-    if ok:
+    if ok and wake_owner_default():
         # A wake failure never reverses the recorded answer, so it is reported
         # beside the queued state instead of failing the submit.
         wake_detail = wake_owner(dialog)
@@ -2688,13 +2760,22 @@ class UI:
             mark = "\u25cf " if selected else "\u25cb "
             rec = opt["value"] == d.recommend
             rec_text = " REC " if rec else ""
+            # A card's label is prose; show the value too whenever the two
+            # differ, because the value is what gets submitted.
+            value_text = "" if opt["value"] == opt["label"] else f" \u00b7 {opt['value']}"
             room = cw - display_width(lead + mark) - display_width(rec_text)
-            label = clip(opt["label"], max(4, room))
-            gap = max(0, cw - display_width(lead + mark + label) - display_width(rec_text))
+            label = clip(opt["label"], max(4, room - display_width(value_text)))
+            gap = max(
+                0,
+                cw
+                - display_width(lead + mark + label + value_text)
+                - display_width(rec_text),
+            )
             label_segments = [
                 (lead, fg(C_ACCENT) if cursor else ""),
                 (mark, fg(C_DECIDE) if selected else fg(C_DIM)),
                 (label, BOLD if selected else ""),
+                (value_text, fg(C_DIM)),
                 (" " * gap, ""),
             ]
             if rec:
@@ -2767,8 +2848,16 @@ class UI:
 
         add_footer("", "blank")
         status = "queueing\u2026" if d.busy else ("\u2713 queued" if d.queued else "")
+        current = d.selected_option()
+        reconcile = bool(current and current["value"] == "reconcile")
+        if reconcile:
+            button_text = " Queue reconcile request "
+        elif d.close == "release":
+            button_text = " Queue answer \u00b7 releases hold "
+        else:
+            button_text = " Queue answer "
         button_segments = [
-            (" Queue answer ", REV + BOLD + fg(C_OK if d.queued else C_ACCENT))
+            (button_text, REV + BOLD + fg(C_OK if d.queued else C_ACCENT))
         ]
         if status:
             button_segments.append(("  ", ""))
@@ -2776,6 +2865,22 @@ class UI:
                 (f" {status} ", REV + fg(C_OK) if d.queued else fg(C_WARN))
             )
         add_footer_segments(button_segments, "button")
+        # Consent line: what a submit does beyond the answer record itself.
+        if reconcile:
+            outcome = f"binds {DECISION_SOURCE_ID} if unbound, then files a re-check"
+        else:
+            outcome = "releases hold" if d.close == "release" else "closes task"
+            if d.wake_home and d.wake_lane:
+                outcome += (
+                    f" \u00b7 steers {d.wake_lane}"
+                    if d.wake_enabled
+                    else " \u00b7 owner wake off"
+                )
+        add_footer(
+            clip(f"\u2192 {_flatten_field(d.key)} \u00b7 {outcome}", inner),
+            "hint",
+            C_DIM,
+        )
         help_bits = [
             "esc close",
             "\u2191\u2193 move",
@@ -3201,6 +3306,21 @@ def parse_input(buf: bytes, ui: UI) -> bytes:
 # ----------------------------------------------------------------------------
 
 
+def _print_home_cols(label: str, path: str, cols: dict[str, list[Card]]) -> None:
+    print(f"== {label}  ({path})")
+    for key, title in COLUMNS:
+        cards = cols.get(key) or []
+        print(f"  {title} ({len(cards)})")
+        for c in cards:
+            agent = " ".join(p for p in (c.agent, c.model, c.effort) if p) or "-"
+            pane = c.pane_id or "-"
+            line = f"    {c.id} [{c.badge}] {agent} pane={pane}"
+            if c.bucket == "charted":
+                line += f" wt={c.worktree or '-'}"
+            print(line)
+    print()
+
+
 def once(active_label: str = "", all_homes: bool = False) -> int:
     homes = discover_homes()
     if not homes:
@@ -3208,24 +3328,29 @@ def once(active_label: str = "", all_homes: bool = False) -> int:
         return 1
     agents, panes = herdr_agents()
     meta_index = build_meta_index(homes)
-    selected = [h for h in homes if all_homes or not active_label or h.label == active_label] or homes
+    if active_label == ALL_CREW_LABEL:
+        all_homes = True
+        active_label = ""
+    # The synthetic All home has no path to snapshot, so the fleet view is the
+    # merge of the real homes - the same one the interactive board shows.
+    fleet = real_homes(homes)
+    if active_label:
+        selected = [h for h in fleet if h.label == active_label] or fleet
+    else:
+        selected = fleet
+    parts: list[tuple[Home, dict[str, list[Card]], dict[str, int]]] = []
     for home in selected:
         snap = bearings_snapshot(home)
         cols: dict[str, list[Card]] = {k: [] for k, _ in COLUMNS}
+        totals: dict[str, int] = {k: 0 for k, _ in COLUMNS}
         if snap:
-            cols, _totals = make_cards(home, snap, meta_index, agents, panes, homes)
-        print(f"== {home.label}  ({home.path})")
-        for key, title in COLUMNS:
-            cards = cols.get(key) or []
-            print(f"  {title} ({len(cards)})")
-            for c in cards:
-                agent = " ".join(p for p in (c.agent, c.model, c.effort) if p) or "-"
-                pane = c.pane_id or "-"
-                line = f"    {c.id} [{c.badge}] {agent} pane={pane}"
-                if c.bucket == "charted":
-                    line += f" wt={c.worktree or '-'}"
-                print(line)
-        print()
+            cols, totals = make_cards(home, snap, meta_index, agents, panes, homes)
+        parts.append((home, cols, totals))
+    if all_homes:
+        merged, _totals = merge_fleet_columns(parts)
+        _print_home_cols(ALL_CREW_LABEL, f"{len(parts)} homes", merged)
+    for home, cols, _totals in parts:
+        _print_home_cols(home.label, home.path, cols)
     return 0
 
 

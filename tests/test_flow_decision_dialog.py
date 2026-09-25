@@ -258,6 +258,35 @@ def main() -> int:
         check(dialog.reconcile_line() == "demo-issue-29\talready moot?",
               "reconcile carries the note as provenance")
 
+        # CR/LF/TAB can never split one keyed line into extra intake rows
+        hostile = dict(content)
+        hostile["title"] = "Line one\nother-task\tinjected"
+        hostile["options"] = [{"value": "hold\ttab", "label": "Hold", "hint": ""}]
+        hostile["recommend"] = ""
+        hostile_dialog = flow.DecisionDialog(hostile)
+        hostile_dialog.selected = 0
+        hostile_dialog.note = "note\rwith break"
+        hostile_line = hostile_dialog.keyed_line()
+        check("\n" not in hostile_line and "\r" not in hostile_line,
+              "the keyed line carries no line breaks")
+        check(len(hostile_line.split("\t")) == 3,
+              "the keyed line stays one row of its three fields")
+        hostile_release = dict(hostile)
+        hostile_release["close"] = "release"
+        hostile_release_dialog = flow.DecisionDialog(hostile_release)
+        hostile_release_dialog.selected = 0
+        hostile_release_dialog.note = "note\rwith break"
+        check(len(hostile_release_dialog.keyed_line().split("\t")) == 4,
+              "a declared close mode adds exactly one field, never a row")
+        hostile_fields = hostile_line.split("\t")
+        check(hostile_fields[1] == "hold tab - note with break",
+              "newlines and tabs are flattened out of the answer")
+        check("other-task injected" in hostile_fields[2],
+              "newlines and tabs are flattened out of the label")
+        hostile_dialog.note = "a\nb"
+        check(hostile_dialog.reconcile_line() == "demo-issue-29\ta b",
+              "reconcile provenance is flattened too")
+
         # no composed card: the summary is the title and only reconcile is listed
         bare = make_card(task="no-composed-card", title="Run #29's release checklist")
         bare_content = flow.decision_card_content(bare, [main_home, mate_home], main_home)
@@ -337,6 +366,22 @@ def main() -> int:
         check("\u25b2" not in text and "\u25bc" not in text,
               "column headers carry no scroll arrows")
         check(text.count("DECISION") == 1, "the type badge is shown once, on the card's own header")
+        check("Hold it \u00b7 hold" in text,
+              "an option shows the value it submits when label and value differ")
+        check("\u2192 demo-issue-29 \u00b7 closes task" in text,
+              "the dialog says the submit sends a keyed answer that closes the task")
+        release_content = dict(content)
+        release_content["close"] = "release"
+        ui_release = flow.UI()
+        ui_release.dialog = flow.DecisionDialog(release_content)
+        frame_release = io.StringIO()
+        with contextlib.redirect_stdout(frame_release):
+            ui_release.render(snap)
+        release_text = ANSI.sub("", frame_release.getvalue())
+        check("Queue answer \u00b7 releases hold" in release_text,
+              "the submit button names the release close mode")
+        check("releases hold" in release_text,
+              "the release close mode is visible before submitting")
         check(ui.dialog_hit, "option/action rows register click regions")
 
         # ---- input routing ----
@@ -367,6 +412,21 @@ def main() -> int:
                 break
             time.sleep(0.02)
         check(bool(dead.dialog.error), "a submit with no owning home reports a refusal")
+
+        # a malformed key is refused before anything is sent
+        bad_key = dict(content)
+        bad_key["key"] = "demo-issue-29\nother-task"
+        bad_dialog = flow.DecisionDialog(bad_key)
+        bad_dialog.home_path = mate_home.path
+        bad_ok, bad_detail = flow.run_submit(bad_dialog)
+        check(not bad_ok and "malformed task key" in bad_detail,
+              "a key with a line break in it is refused visibly")
+
+        # a lane owner outside the slug charset never becomes a wake target
+        check(flow.resolve_owner_lane([main_home], "../escape") == (None, ""),
+              "a traversal-shaped lane owner resolves to no wake target")
+        check(flow.resolve_owner_lane([main_home], "demo-lane") == (None, ""),
+              "an unrecorded lane resolves to no wake target")
 
         # the exact intake calls: keyed answer, card-declared release, and the
         # bound reconcile-request path that never touches `answers`
@@ -464,6 +524,27 @@ def main() -> int:
             "the wake carries the captain's answer",
         )
 
+        # FM_FLOW_WAKE=0 keeps the submit to the intake alone
+        wake_off_log = os.path.join(root, "wake-off.log")
+        with open(send_stub, "w") as fh:
+            fh.write(f'#!/usr/bin/env bash\nprintf "%s\\n" "$@" >> "{wake_off_log}"\n')
+        os.chmod(send_stub, 0o755)
+        off_content = flow.decision_card_content(wake_card, [main_home, mate_home], main_home)
+        check(off_content["wake_enabled"] is True,
+              "the dialog captures the wake setting when the card opens")
+        off_dialog = flow.DecisionDialog(off_content)
+        off_dialog.home_path = mate_home.path
+        os.environ["FM_FLOW_WAKE"] = "0"
+        original_run3 = getattr(flow, "_run_captain_hold")
+        try:
+            setattr(flow, "_run_captain_hold", lambda home, args, stdin_text: (True, ""))
+            off_ok, off_detail = flow.run_submit(off_dialog)
+        finally:
+            setattr(flow, "_run_captain_hold", original_run3)
+            os.environ.pop("FM_FLOW_WAKE", None)
+        check(off_ok and off_detail == "", "an opted-out submit still records the answer")
+        check(not os.path.exists(wake_off_log), "FM_FLOW_WAKE=0 skips the owner wake")
+
         cols = {key: [] for key, _ in flow.COLUMNS}
         cols["charted"] = [object()]
         cols["underway"] = [object(), object()]
@@ -485,6 +566,31 @@ def main() -> int:
             cfg = os.path.join(tmp, "plugins", "config", "herdr-firstmate-flow")
             os.makedirs(cfg)
             open(os.path.join(cfg, "show_landed"), "w").write("0\n")
+            old_plugin_cfg = os.environ.get("HERDR_PLUGIN_CONFIG_DIR")
+            os.environ["HERDR_PLUGIN_CONFIG_DIR"] = cfg
+            try:
+                check(flow._plugin_config_dir() == cfg,
+                      "HERDR_PLUGIN_CONFIG_DIR wins, as it does for kanban-view.sh")
+            finally:
+                if old_plugin_cfg is None:
+                    os.environ.pop("HERDR_PLUGIN_CONFIG_DIR", None)
+                else:
+                    os.environ["HERDR_PLUGIN_CONFIG_DIR"] = old_plugin_cfg
+
+            old_only = os.environ.get("FM_FLOW_HOMES_ONLY")
+            os.environ["FM_FLOW_HOMES_ONLY"] = "1"
+            try:
+                check(flow.homes_only_default() is True,
+                      "FM_FLOW_HOMES_ONLY=1 enables explicit-only discovery")
+                os.environ["FM_FLOW_HOMES_ONLY"] = "off"
+                check(flow.homes_only_default() is False,
+                      "FM_FLOW_HOMES_ONLY=off restores the scan")
+            finally:
+                if old_only is None:
+                    os.environ.pop("FM_FLOW_HOMES_ONLY", None)
+                else:
+                    os.environ["FM_FLOW_HOMES_ONLY"] = old_only
+
             old_cfg = os.environ.get("HERDR_CONFIG_DIR")
             os.environ["HERDR_CONFIG_DIR"] = tmp
             try:

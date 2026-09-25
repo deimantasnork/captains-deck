@@ -92,7 +92,8 @@ Captain's Deck is that bridge: a kanban board where you can:
 - jump to the live Herdr pane when you actually need eyes on an agent,
 - and leave everything else running without babysitting terminals.
 
-The board stays read-only except for those guarded keyed answers, so orchestration keeps running and you only touch what actually requires the captain.
+The board stays read-only except for those guarded keyed answers and the steering they trigger, so orchestration keeps running and you only touch what actually requires the captain.
+Submitting an answer records the durable decision, steers the owning lane's inbox, and (on a first Reconcile) binds this Deck as the captured source; the dialog spells those effects out before you queue, and `FM_FLOW_WAKE=0` keeps a submit to the intake alone.
 
 **You steer the ship. Firstmate runs the crew. Captain's Deck shows you where your attention is actually needed.**
 
@@ -105,7 +106,8 @@ on each mate's own tab. After **All**, the captain home plus each secondmate
 home appear as crew tabs. Each tab projects that home's bearings snapshot into
 five fixed columns. Nothing is ever written back, with one deliberate exception: a
 Captain's Call answer (see below), where the captain's own decision goes to
-Firstmate's guarded keyed-answer intake.
+Firstmate's guarded keyed-answer intake, and the owning lane is steered so the
+answer is acted on.
 
 | Column | Source |
 | --- | --- |
@@ -206,12 +208,18 @@ the note, `Tab` jumps between the options and the note, `Enter` queues, and
 `esc` closes without answering.
 - The answer is piped to Firstmate's one keyed-answer intake
 (`bin/fm-captain-hold.sh answers`) in the home that owns the ticket, with this
-Deck as its provenance. A card that declares `close: "release"` releases the
-gated work instead of completing it.
+Deck as its provenance. The key, answer and label are flattened first, so a
+newline or tab in card text can never become a second answer row. A card that
+declares `close: "release"` releases the gated work instead of completing it.
+- The dialog shows the option's value whenever it differs from its label, names
+the card-declared close on the submit button (`Queue answer · releases hold`),
+and prints one line of what a submit does beyond the record: the exact key, the
+close or release, and the lane that will be steered.
 - After the record lands, the Deck steers the agent that owns the call through
 the parent home's lane inbox (`fm-send.sh`), so a released item resumes and a
 re-check actually gets worked. A wake problem is shown beside the queued state;
-the recorded answer is never reversed.
+the recorded answer is never reversed. Set `FM_FLOW_WAKE=0` (or `wake_owner=0`
+in the config dir) to keep a submit to the intake alone.
 - `Reconcile` is the reserved value: it files a durable reconcile request
 through `reconcile-requests`, binding `herdr-firstmate-flow` as its captured
 source on first use, and never closes anything by itself. The call leaves
@@ -294,6 +302,12 @@ Homes are discovered in this order (first match wins per path):
 3. `FM_HOME` or the legacy `fm_home` config file
 4. `~/firstmate` plus `~/.treehouse/*/*/firstmate` worktree homes
 
+The explicit list is additive by default: setting `FM_FLOW_HOMES` or
+`homes.conf` labels the homes it names, while the scan still runs. Set
+`FM_FLOW_HOMES_ONLY=1` (or `homes_only=1` in the config dir) to make the
+explicit list the only source; with nothing configured it falls back to the
+scan rather than showing an empty board.
+
 A home is shown when it has task directories **or** a live Herdr agent running
 in it. An unleased spare treehouse worktree - no lease holder, no presentation
 label, no live agent - is hidden, because it is a slot rather than a crew. Labels come from the treehouse lease holder
@@ -308,7 +322,11 @@ Plugin config lives in:
   fm_home        # legacy single-home config (still honored)
   homes.conf     # optional label=path list
   show_landed    # optional: 0 hides the Landed column
+  wake_owner     # optional: 0 skips the owner steer after an answer
+  homes_only     # optional: 1 limits discovery to FM_FLOW_HOMES/homes.conf
   debug_log      # optional: a path, or an empty file for <config>/debug_log.log
+  flow-overlay.panes  # internal: recorded overlay pane ids
+  deck-flow.panes     # internal: recorded captain's deck pane ids
 ```
 
 Environment knobs:
@@ -322,6 +340,8 @@ Environment knobs:
 | `FM_FLOW_SHOW_LANDED` | `1` | Show the Landed column (`0` = hide it, also toggleable with `L`) |
 | `FM_FLOW_ALL` | `0` | `1` = request every row from bearings instead of Firstmate's bounds |
 | `FM_FLOW_HOMES` | — | Explicit `label=path` crew list |
+| `FM_FLOW_HOMES_ONLY` | `0` | `1` = discover only `FM_FLOW_HOMES`/`homes.conf` homes |
+| `FM_FLOW_WAKE` | `1` | `0` = record the answer without steering the owning lane |
 | `FM_FLOW_DEBUG` | — | Append click/collector debug lines to this file |
 
 ## Open the board
@@ -330,6 +350,10 @@ Environment knobs:
 - Action **Open captain's deck** — full board in a dedicated `captain's deck`
   workspace (created on first use, refocused afterwards)
 - Or bind keys in `~/.config/herdr/config.toml`
+
+Both launchers only focus or close panes this plugin opened - tracked by
+recorded pane id, or verified by the pane's foreground process being the board.
+A user pane that merely shares the `Flow` label is never touched.
 
 Press `q` in the pane to exit.
 
