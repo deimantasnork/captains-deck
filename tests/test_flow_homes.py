@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import importlib.util
+import json
 import io
 import os
 import sys
@@ -152,6 +153,33 @@ def test_once_home_all_is_the_merged_fleet(tmp_path: Path) -> None:
     assert rc == 0
     assert "== All  (1 homes)" in text, text
     assert "== All  ()" not in text, text
+
+
+def test_lease_holders_survives_a_null_worktrees_field(tmp_path: Path) -> None:
+    """A state file with "worktrees": null must not kill discovery.
+
+    Regression: dict.get("worktrees", []) returns None when the key exists with
+    a null value (the default only applies to a missing key), so iterating it
+    raised TypeError and no frame ever rendered on a host with many pooled
+    treehouse states.
+    """
+    root = tmp_path / "treehouse" / "proj-abc"
+    root.mkdir(parents=True)
+    (root / "treehouse-state.json").write_text('{"worktrees": null}')
+    assert flow._lease_holders(str(tmp_path / "treehouse")) == {}
+
+
+def test_lease_holders_reads_a_leased_worktree(tmp_path: Path) -> None:
+    """The positive case: a leased worktree maps its real path to its holder."""
+    root = tmp_path / "treehouse" / "proj-abc"
+    root.mkdir(parents=True)
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    (root / "treehouse-state.json").write_text(
+        json.dumps({"worktrees": [{"lease_holder": "mate-1", "path": str(wt)}]})
+    )
+    holders = flow._lease_holders(str(tmp_path / "treehouse"))
+    assert holders == {os.path.realpath(wt): "mate-1"}
 
 
 def main() -> int:
