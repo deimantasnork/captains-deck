@@ -315,6 +315,11 @@ The explicit list is additive by default: setting `FM_FLOW_HOMES` or
 explicit list the only source; with nothing configured it falls back to the
 scan rather than showing an empty board.
 
+On a large fleet the bearings walk is the slow part: it has been measured
+at ~112s for a captain home with 58 in-flight tasks, so `bearings_timeout`
+may need raising above its 180s default and `bearings_secs` set so the walk
+is not repeated on every refresh.
+
 A home is shown when it has task directories **or** a live Herdr agent running
 in it. An unleased spare treehouse worktree - no lease holder, no presentation
 label, no live agent - is hidden, because it is a slot rather than a crew. Labels come from the treehouse lease holder
@@ -331,6 +336,8 @@ Plugin config lives in:
   show_landed    # optional: 0 hides the Landed column
   wake_owner     # optional: 0 skips the owner steer after an answer
   homes_only     # optional: 1 limits discovery to FM_FLOW_HOMES/homes.conf
+  bearings_secs  # optional: seconds a bearings snapshot stays cached
+  bearings_timeout # optional: seconds allowed for one snapshot walk
   debug_log      # optional: a path, or an empty file for <config>/debug_log.log
   flow-overlay.panes  # internal: recorded overlay pane ids
   deck-flow.panes     # internal: recorded captain's deck pane ids

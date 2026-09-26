@@ -191,7 +191,25 @@ TICK_SECS = max(
     ),
 )
 # How often the expensive bearings snapshot (columns/paths) is rebuilt.
-BEARINGS_TTL = max(2.0, min(600.0, _float(os.environ.get("FM_FLOW_BEARINGS_SECS"), 20.0)))
+def _cfg_value(name: str) -> str:
+    """Read a plain scalar from the plugin config dir (same convention as show_landed)."""
+    try:
+        with open(os.path.join(_plugin_config_dir(), name)) as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
+def _cfg_or_env(file_name: str, env_name: str) -> str:
+    return os.environ.get(env_name) or _cfg_value(file_name)
+
+
+def _bearings_ttl() -> float:
+    return max(2.0, min(3600.0, _float(_cfg_or_env("bearings_secs", "FM_FLOW_BEARINGS_SECS"), 20.0)))
+# Snapshot walk budget: a large fleet can take minutes (measured 112s on a
+# 58-task captain home), so this must be configurable, not a bare 25s.
+def _bearings_timeout() -> float:
+    return max(5.0, _float(_cfg_or_env("bearings_timeout", "FM_FLOW_BEARINGS_TIMEOUT"), 180.0))
 # Rows scrolled per wheel notch (cards are 8 rows tall, so 3 feels smooth).
 WHEEL_ROWS = max(1, min(8, _int(os.environ.get("FM_FLOW_WHEEL_ROWS"), 3)))
 # Landed grows forever in Firstmate's archive; show only the newest few.
@@ -564,7 +582,7 @@ def _lease_holders(treehouse_root: str) -> dict[str, str]:
                 data = json.load(fh)
         except Exception:
             continue
-        for wt in data.get("worktrees", []):
+        for wt in (data.get("worktrees") or []):
             holder = wt.get("lease_holder")
             path = wt.get("path")
             if holder and path:
@@ -1093,7 +1111,7 @@ def bearings_snapshot(home: Home) -> dict:
             [bin_path, *bearings_flags()],
             capture_output=True,
             text=True,
-            timeout=25,
+            timeout=_bearings_timeout(),
             env=env,
             stdin=subprocess.DEVNULL,
         )
@@ -1975,7 +1993,7 @@ class Collector(threading.Thread):
             self._force
             or not raw
             or raw_path != home.path
-            or now - ts > BEARINGS_TTL
+            or now - ts > _bearings_ttl()
         )
 
     def _load_bearings(
