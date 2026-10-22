@@ -83,3 +83,18 @@ def test_rows_view_renders_one_line_per_ticket_under_each_title():
     assert any(line.startswith(f"{titles[-1]} (1)") for line in text)
     assert sum("title of a-" in line for line in text) == 2
     assert [c.task for *_, c in ui.card_regions] == ["a-1", "a-2", "z-1"]
+
+
+def test_the_selected_row_expands_to_show_the_text_it_cut():
+    ui, snap = _ui()
+    ui.rows_view = True
+    long_title = "word " * 60
+    snap.cols[flow.COLUMNS[0][0]][0].title = long_title
+    with contextlib.redirect_stdout(io.StringIO()):
+        ui.render(snap)
+    text = " ".join(ANSI.sub("", line) for line in ui.last_frame or [])
+    assert text.count("word") > len(long_title.split()) // 2  # wrapped in full
+    ui.card_idx = 1  # a short row that fits shows no expansion
+    with contextlib.redirect_stdout(io.StringIO()):
+        ui.render(snap)
+    assert [c.task for *_, c in ui.card_regions].count("a-2") == 1

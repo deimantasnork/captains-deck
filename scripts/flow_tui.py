@@ -3490,6 +3490,7 @@ class UI:
         wd["title"] = max(0, min(nat["title"], room()))
         rows: list[tuple[str, Card | None]] = []
         sel_row = 0
+        sel_end = 0
         for ci, (ckey, title) in enumerate(self.columns):
             cards = snap.cols.get(ckey) or []
             total = snap.totals.get(ckey) or len(cards)
@@ -3519,12 +3520,27 @@ class UI:
                 else:
                     line = f"   {line}"
                 rows.append((line, card))
-        # keep the selected row on screen, with its group title when it fits
+                if selected:
+                    # the selected row expands: each cell it cut or dropped,
+                    # in full, wrapped under the ID
+                    indent = 3 + wd["badge"] + 1
+                    c = cells[id(card)]
+                    colors["id"] = colors["title"] = None
+                    for k in keys[1:]:
+                        if display_width(c[k]) <= wd[k]:
+                            continue
+                        color = colors[k]
+                        for part in wrap_text(c[k], w - indent):
+                            text = " " * indent + part
+                            rows.append((f"{fg(color)}{text}{RESET}" if color else text, card))
+                    sel_end = len(rows) - 1
+        # keep the selected row and its expansion on screen, with its group
+        # title when it fits
         off = self.scroll.get("__rows__", 0)
         if sel_row < off:
             off = max(0, sel_row - 2)
-        elif sel_row >= off + body_h:
-            off = sel_row - body_h + 1
+        elif sel_end >= off + body_h:
+            off = min(sel_row, sel_end - body_h + 1)
         off = min(off, max(0, len(rows) - body_h))
         self.scroll["__rows__"] = off
         for r, (text, card) in enumerate(rows[off : off + body_h]):
