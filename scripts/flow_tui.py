@@ -3460,11 +3460,34 @@ class UI:
         body_h = max(1, h - 1 - body_top)
         self.body_h = body_h
         aggregate = snap.home is not None and is_aggregate_home(snap.home)
-        badge_w, id_w, agent_w = 14, 18, 24
-        flex = max(12, w - 3 - badge_w - id_w - agent_w - 4)
-        title_w = flex * 2 // 5
-        status_w = flex * 3 // 10
-        footer_w = max(0, flex - title_w - status_w)
+        keys = ("badge", "id", "title", "agent", "status", "footer")
+        cells: dict[int, dict[str, str]] = {}
+        for ckey, _ in self.columns:
+            for card in snap.cols.get(ckey) or []:
+                crew = self._crew_label(snap, card.home_path) if aggregate else ""
+                cells[id(card)] = {
+                    "badge": card.badge,
+                    "id": card.id,
+                    "title": card.title or card.task,
+                    "agent": self.card_agent_line(card),
+                    "status": self.card_status_line(card, 9999),
+                    "footer": self.card_footer_line(card, crew),
+                }
+        # size each cell to its longest value (capped); the title gets the rest
+        caps = {"badge": 16, "id": 32, "agent": 24, "status": 48, "footer": 40}
+        nat = {k: max((display_width(c[k]) for c in cells.values()), default=0) for k in keys}
+        wd = {k: min(nat[k], cap) for k, cap in caps.items()}
+        want = min(nat["title"], 32)
+
+        def room() -> int:  # title width left after the marker, cells and separators
+            return w - 3 - sum(wd.values()) - sum(1 for v in wd.values() if v)
+
+        for k in ("footer", "status", "agent"):  # a narrow pane drops these whole
+            if room() >= want:
+                break
+            wd[k] = 0
+        wd["id"] = max(min(wd["id"], 12), wd["id"] - max(0, want - room()))
+        wd["title"] = max(0, min(nat["title"], room()))
         rows: list[tuple[str, Card | None]] = []
         sel_row = 0
         for ci, (ckey, title) in enumerate(self.columns):
@@ -3481,21 +3504,16 @@ class UI:
                 selected = ci == self.col_idx and i == self.card_idx
                 if selected:
                     sel_row = len(rows)
-                crew = self._crew_label(snap, card.home_path) if aggregate else ""
-
-                def cell(text: str, width: int, color: int | None = None) -> str:
+                colors = {"badge": card.badge_color, "agent": C_DIM, "status": C_WARN, "footer": C_DIM}
+                parts = []
+                for k in keys:
+                    if not wd[k] and k != "title":
+                        continue
+                    text = pad(clip(cells[id(card)][k], wd[k]), wd[k])
+                    color = colors.get(k)
                     # the selected row is one reverse-video bar, so no inner resets
-                    text = pad(clip(text, width), width)
-                    return f"{fg(color)}{text}{RESET}" if color and not selected else text
-
-                line = " ".join([
-                    cell(card.badge, badge_w, card.badge_color),
-                    cell(card.id, id_w),
-                    cell(card.title or card.task, title_w),
-                    cell(self.card_agent_line(card), agent_w, C_DIM),
-                    cell(self.card_status_line(card, status_w), status_w, C_WARN),
-                    cell(self.card_footer_line(card, crew), footer_w, C_DIM),
-                ])
+                    parts.append(f"{fg(color)}{text}{RESET}" if color and not selected else text)
+                line = " ".join(parts)
                 if selected:
                     line = f"{REV}{BOLD} \u25b6 {line}{RESET}"
                 else:
