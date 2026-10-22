@@ -1268,8 +1268,8 @@ def read_status_tail(path: str) -> tuple[str, str, int]:
     line = lines[-1]
     m = re.match(r"^(?P<state>[a-zA-Z_-]+)(?:\s+\[at=(?P<at>\d+)\])?\s*:?\s*(?P<text>.*)$", line)
     if not m:
-        return "", line[:200], 0
-    return m.group("state"), m.group("text")[:200], _int(m.group("at") or 0)
+        return "", line[:1000], 0
+    return m.group("state"), m.group("text")[:1000], _int(m.group("at") or 0)
 
 
 def build_meta_index(homes: list[Home]) -> dict[str, tuple[str, str]]:
@@ -4089,8 +4089,9 @@ class UI:
         also carry the thinking effort when the row has room for it.
         """
         base = (card.doing or "").strip()
-        if not base:
-            base = (card.status_text or "").strip()
+        full = (getattr(card, "status_text", "") or "").strip()
+        if not base or (base.endswith("\u2026") and full.startswith(base[:-1])):
+            base = full  # Firstmate cuts doing; the status file has it whole
         label = badge_label_from_badge(getattr(card, "badge", "") or "")
         low = base.lower()
         if low.startswith("harness busy") or (label and low.startswith(label)):
