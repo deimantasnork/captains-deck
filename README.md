@@ -257,7 +257,8 @@ The footer shows the frequent actions - `? help`, `L - Show/Hide Landed`, and
 `↑↓` / `j k` move between cards, `pgup`/`pgdn` or the wheel scroll a column,
 clicking a crew tab switches mate, `enter` or a click opens a Captain's Call
 ticket, `o` opens the selected agent pane, `m` opens the Message Firstmate box, `1-9` / `tab` switch crew
-(All = fleet), `L` shows or hides the Landed column, `r` refreshes the board,
+(All = fleet), `L` shows or hides the Landed column, `v` switches between
+columns and rows, `r` refreshes the board,
 and `q` quits. `esc` or `?` closes the modal, and a click outside it closes it
 too.
 
@@ -377,6 +378,7 @@ The board never redraws itself wholesale.
 | `m` | Open the Message Firstmate box; `Enter` sends, `Esc` closes |
 | `r` / `q` | Force a bearings refresh / quit |
 | `L` | Show/hide the Landed column |
+| `v` | Switch between columns and rows: each column becomes a titled group with one line per ticket, and `j`/`k` move across groups |
 
 Input repaints immediately (no waiting for the next data tick), and a burst of
 wheel events is coalesced into a single repaint. Scrolling moves by terminal

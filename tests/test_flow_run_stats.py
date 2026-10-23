@@ -137,3 +137,13 @@ def test_pi_session_run_stats_sums_tokens():
         assert elapsed.endswith("s") or "m" in elapsed
     finally:
         Path(path).unlink(missing_ok=True)
+
+
+def test_status_line_prefers_the_whole_status_over_a_cut_doing():
+    card = flow.Card()
+    card.doing = "PR https://github.com/o/r/pull/18 body now names only https:/…"
+    card.status_text = "PR https://github.com/o/r/pull/18 body now names only https://github.com/o/r/pull/31"
+    card.badge = "⏸ paused"
+    card.effort = ""
+    card.run_elapsed = card.run_tokens = ""
+    assert flow.UI.card_status_line(card, 9999) == card.status_text

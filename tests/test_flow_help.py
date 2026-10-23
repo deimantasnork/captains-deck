@@ -68,6 +68,7 @@ def test_footer_shows_the_quick_actions():
         "? help",
         "L - Show/Hide Landed",
         "A - Show/Hide answered",
+        "v - Rows/Columns",
         "r - Refresh board",
     ]
 

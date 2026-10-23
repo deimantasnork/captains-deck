@@ -68,6 +68,7 @@ _FOOTER_HINTS = (
     ("? help", "help"),
     ("L - Show/Hide Landed", "landed"),
     ("A - Show/Hide answered", "answered"),
+    ("v - Rows/Columns", "view"),
     ("r - Refresh board", "refresh"),
 )
 
@@ -1269,8 +1270,8 @@ def read_status_tail(path: str) -> tuple[str, str, int]:
     line = lines[-1]
     m = re.match(r"^(?P<state>[a-zA-Z_-]+)(?:\s+\[at=(?P<at>\d+)\])?\s*:?\s*(?P<text>.*)$", line)
     if not m:
-        return "", line[:200], 0
-    return m.group("state"), m.group("text")[:200], _int(m.group("at") or 0)
+        return "", line[:1000], 0
+    return m.group("state"), m.group("text")[:1000], _int(m.group("at") or 0)
 
 
 def build_meta_index(homes: list[Home]) -> dict[str, dict[str, str]]:
@@ -2976,6 +2977,8 @@ class UI:
         # Session-only view state: the collector leaves answered calls off the
         # board unless this is on, because they leave and return with the flag.
         self.reveal_answered = False
+        # Session-only: show each column as a group of one-line rows.
+        self.rows_view = False
         self.columns = self.board_columns(None)
         self.col_idx = 0
         self.card_idx = 0
@@ -3035,6 +3038,33 @@ class UI:
         set_show_landed_pref(self.show_landed)
         self.dirty = True
         self.say(f"landed column {'shown' if self.show_landed else 'hidden'}")
+
+    def toggle_view(self) -> None:
+        self.rows_view = not self.rows_view
+        self.dirty = True
+        self.say(f"{'rows' if self.rows_view else 'columns'} view")
+
+    def move_card(self, delta: int) -> None:
+        """j/k: in the rows view the selection flows on into the next or
+        previous column group; in the columns view it stays in its column."""
+        if not self.rows_view:
+            self.card_idx = max(0, self.card_idx + delta)
+            return
+        snap = self.collector.snapshot()
+        flat = [
+            (ci, i)
+            for ci, (key, _) in enumerate(self.columns)
+            for i in range(len(snap.cols.get(key) or []))
+        ]
+        if not flat:
+            return
+        cur = (self.col_idx, self.card_idx)
+        pos = next((n for n, at in enumerate(flat) if at >= cur), len(flat))
+        if pos < len(flat) and flat[pos] == cur:
+            pos += delta
+        elif delta < 0:
+            pos -= 1  # the selection sits in an empty group or past its end
+        self.col_idx, self.card_idx = flat[max(0, min(len(flat) - 1, pos))]
 
     def toggle_answered(self) -> None:
         """Show or hide the Captain's Call rows the captain already answered."""
@@ -3314,7 +3344,9 @@ class UI:
             return
         if button in (64, 65, 68, 69):  # wheel; shift+wheel = 68/69 (all columns)
             delta = (-WHEEL_ROWS if button in (64, 68) else WHEEL_ROWS)
-            if button in (68, 69):
+            if self.rows_view:
+                self.move_card(-1 if delta < 0 else 1)
+            elif button in (68, 69):
                 for key, _ in self.columns:
                     self.scroll_by(key, delta)
             else:
@@ -3330,6 +3362,8 @@ class UI:
                         self.toggle_landed()
                     elif action == "answered":
                         self.toggle_answered()
+                    elif action == "view":
+                        self.toggle_view()
                     elif action == "refresh":
                         self.collector.refresh_now()
                         self.say("refreshing\u2026")
@@ -3422,81 +3456,84 @@ class UI:
 
         lines.append(f"{fg(C_BORDER)}{'─' * w}{RESET}")
 
-        # column strip geometry (row-level scrolling: one card = 8 rows)
-        gaps = len(self.columns) - 1
-        colw = max(10, (w - gaps) // max(1, len(self.columns)))
-        self.colw = colw
-        body_top = 4          # rows 0-3: header, rule, column titles, rule
-        body_bottom = h - 2   # last row is the footer/help line
-        body_h = max(8, body_bottom - body_top + 1)
-        self.body_h = body_h
-        _debug(
-            f"render w={w} h={h} body_h={body_h} scroll={dict(self.scroll)} "
-            f"cards={ {k: len(v) for k, v in snap.cols.items()} }"
-        )
-
-        # clamp every column's row offset, then keep the selection visible
-        for ckey, _ in self.columns:
-            cards = snap.cols.get(ckey) or []
-            max_off = max(0, len(cards) * 8 - body_h)
-            self.scroll[ckey] = min(max(0, self.scroll.get(ckey, 0)), max_off)
-        key = self.current_key()
-        cards_sel = snap.cols.get(key) or []
-        if cards_sel:
-            self.card_idx = min(self.card_idx, len(cards_sel) - 1)
-            off = self.scroll.get(key, 0)
-            top = self.card_idx * 8
-            bottom = top + 6
-            # only move the viewport when the selected card is fully hidden;
-            # a partially clipped card is still visible (smooth scrolling)
-            if bottom < off:
-                off = top
-            elif top > off + body_h - 1:
-                off = bottom - body_h + 1
-            max_off = max(0, len(cards_sel) * 8 - body_h)
-            self.scroll[key] = min(max(0, off), max_off)
+        if self.rows_view:
+            self.render_rows(snap, lines, w, h)
         else:
-            self.card_idx = 0
+            # column strip geometry (row-level scrolling: one card = 8 rows)
+            gaps = len(self.columns) - 1
+            colw = max(10, (w - gaps) // max(1, len(self.columns)))
+            self.colw = colw
+            body_top = 4          # rows 0-3: header, rule, column titles, rule
+            body_bottom = h - 2   # last row is the footer/help line
+            body_h = max(8, body_bottom - body_top + 1)
+            self.body_h = body_h
+            _debug(
+                f"render w={w} h={h} body_h={body_h} scroll={dict(self.scroll)} "
+                f"cards={ {k: len(v) for k, v in snap.cols.items()} }"
+            )
 
-        # column headers with scroll indicators
-        header_cells = []
-        for ckey, title in self.columns:
-            cards = snap.cols.get(ckey) or []
-            total = snap.totals.get(ckey) or len(cards)
-            shown = f"{len(cards)}/{total}" if total > len(cards) else str(len(cards))
-            label = f"{title} ({shown})"
-            header_cells.append(f"{fg(C_ACCENT)}{BOLD}{pad(clip(label, colw), colw)}{RESET}")
-        lines.append(f"{fg(C_BORDER)}\u2502{RESET}".join(header_cells))
-        lines.append(f"{fg(C_BORDER)}{'─' * w}{RESET}")
+            # clamp every column's row offset, then keep the selection visible
+            for ckey, _ in self.columns:
+                cards = snap.cols.get(ckey) or []
+                max_off = max(0, len(cards) * 8 - body_h)
+                self.scroll[ckey] = min(max(0, self.scroll.get(ckey, 0)), max_off)
+            key = self.current_key()
+            cards_sel = snap.cols.get(key) or []
+            if cards_sel:
+                self.card_idx = min(self.card_idx, len(cards_sel) - 1)
+                off = self.scroll.get(key, 0)
+                top = self.card_idx * 8
+                bottom = top + 6
+                # only move the viewport when the selected card is fully hidden;
+                # a partially clipped card is still visible (smooth scrolling)
+                if bottom < off:
+                    off = top
+                elif top > off + body_h - 1:
+                    off = bottom - body_h + 1
+                max_off = max(0, len(cards_sel) * 8 - body_h)
+                self.scroll[key] = min(max(0, off), max_off)
+            else:
+                self.card_idx = 0
 
-        # cards grid: each column is a stack of 8-row card slots, scrolled by rows
-        # so a wheel notch moves the content smoothly instead of by whole cards
-        grid: list[list[str]] = []
-        for ci, (ckey, _) in enumerate(self.columns):
-            cards = snap.cols.get(ckey) or []
-            off = self.scroll.get(ckey, 0)
-            x0 = ci * (colw + 1)
-            col_lines = [" " * colw] * body_h
-            if not cards:
-                placeholder = "  (loading\u2026)" if snap.loading else "  (empty)"
-                col_lines[0] = f"{fg(C_DIM)}{pad(placeholder, colw)}{RESET}"
-            for i, card in enumerate(cards):
-                top = body_top + i * 8 - off
-                if top > body_bottom or top + 6 < body_top:
-                    continue
-                selected = ci == self.col_idx and i == self.card_idx
-                card_lines = self.render_card(card, colw, selected, snap)
-                for j, line in enumerate(card_lines):
-                    y = top + j
-                    if body_top <= y <= body_bottom:
-                        col_lines[y - body_top] = line
-                self.card_regions.append(
-                    (x0, max(body_top, top), x0 + colw, min(body_bottom, top + 6) + 1, card)
-                )
-            grid.append(col_lines)
+            # column headers with scroll indicators
+            header_cells = []
+            for ckey, title in self.columns:
+                cards = snap.cols.get(ckey) or []
+                total = snap.totals.get(ckey) or len(cards)
+                shown = f"{len(cards)}/{total}" if total > len(cards) else str(len(cards))
+                label = f"{title} ({shown})"
+                header_cells.append(f"{fg(C_ACCENT)}{BOLD}{pad(clip(label, colw), colw)}{RESET}")
+            lines.append(f"{fg(C_BORDER)}\u2502{RESET}".join(header_cells))
+            lines.append(f"{fg(C_BORDER)}{'─' * w}{RESET}")
 
-        for r in range(body_h):
-            lines.append(f"{fg(C_BORDER)}\u2502{RESET}".join(col_lines[r] for col_lines in grid))
+            # cards grid: each column is a stack of 8-row card slots, scrolled by rows
+            # so a wheel notch moves the content smoothly instead of by whole cards
+            grid: list[list[str]] = []
+            for ci, (ckey, _) in enumerate(self.columns):
+                cards = snap.cols.get(ckey) or []
+                off = self.scroll.get(ckey, 0)
+                x0 = ci * (colw + 1)
+                col_lines = [" " * colw] * body_h
+                if not cards:
+                    placeholder = "  (loading\u2026)" if snap.loading else "  (empty)"
+                    col_lines[0] = f"{fg(C_DIM)}{pad(placeholder, colw)}{RESET}"
+                for i, card in enumerate(cards):
+                    top = body_top + i * 8 - off
+                    if top > body_bottom or top + 6 < body_top:
+                        continue
+                    selected = ci == self.col_idx and i == self.card_idx
+                    card_lines = self.render_card(card, colw, selected, snap)
+                    for j, line in enumerate(card_lines):
+                        y = top + j
+                        if body_top <= y <= body_bottom:
+                            col_lines[y - body_top] = line
+                    self.card_regions.append(
+                        (x0, max(body_top, top), x0 + colw, min(body_bottom, top + 6) + 1, card)
+                    )
+                grid.append(col_lines)
+
+            for r in range(body_h):
+                lines.append(f"{fg(C_BORDER)}\u2502{RESET}".join(col_lines[r] for col_lines in grid))
 
         # footer
         while len(lines) < h - 1:
@@ -3524,6 +3561,100 @@ class UI:
         if self.message is not None:
             self.render_message(lines, w, h)
         self.paint([clip_ansi(line, w) for line in lines[:h]], w, h)
+
+    def render_rows(self, snap: Snapshot, lines: list[str], w: int, h: int) -> None:
+        """The rows view: each column is a titled group with one line per card."""
+        body_top = len(lines)
+        body_h = max(1, h - 1 - body_top)
+        self.body_h = body_h
+        aggregate = snap.home is not None and is_aggregate_home(snap.home)
+        keys = ("badge", "id", "title", "agent", "status", "footer")
+        cells: dict[int, dict[str, str]] = {}
+        for ckey, _ in self.columns:
+            for card in snap.cols.get(ckey) or []:
+                crew = self._crew_label(snap, card.home_path) if aggregate else ""
+                cells[id(card)] = {
+                    "badge": card.badge,
+                    "id": card.id,
+                    "title": card.title or card.task,
+                    "agent": self.card_agent_line(card),
+                    "status": self.card_status_line(card, 9999),
+                    "footer": self.card_footer_line(card, crew),
+                }
+        # size each cell to its longest value (capped); the title gets the rest
+        caps = {"badge": 16, "id": 32, "agent": 24, "status": 48, "footer": 40}
+        nat = {k: max((display_width(c[k]) for c in cells.values()), default=0) for k in keys}
+        wd = {k: min(nat[k], cap) for k, cap in caps.items()}
+        want = min(nat["title"], 32)
+
+        def room() -> int:  # title width left after the marker, cells and separators
+            return w - 3 - sum(wd.values()) - sum(1 for v in wd.values() if v)
+
+        for k in ("footer", "status", "agent"):  # a narrow pane drops these whole
+            if room() >= want:
+                break
+            wd[k] = 0
+        wd["id"] = max(min(wd["id"], 12), wd["id"] - max(0, want - room()))
+        wd["title"] = max(0, min(nat["title"], room()))
+        rows: list[tuple[str, Card | None]] = []
+        sel_row = 0
+        sel_end = 0
+        for ci, (ckey, title) in enumerate(self.columns):
+            cards = snap.cols.get(ckey) or []
+            total = snap.totals.get(ckey) or len(cards)
+            shown = f"{len(cards)}/{total}" if total > len(cards) else str(len(cards))
+            if rows:
+                rows.append(("", None))
+            rows.append((f"{fg(C_ACCENT)}{BOLD}{title} ({shown}){RESET}", None))
+            if not cards:
+                placeholder = "  (loading\u2026)" if snap.loading else "  (empty)"
+                rows.append((f"{fg(C_DIM)}{placeholder}{RESET}", None))
+            for i, card in enumerate(cards):
+                selected = ci == self.col_idx and i == self.card_idx
+                if selected:
+                    sel_row = len(rows)
+                colors = {"badge": card.badge_color, "agent": C_DIM, "status": C_WARN, "footer": C_DIM}
+                parts = []
+                for k in keys:
+                    if not wd[k] and k != "title":
+                        continue
+                    text = pad(clip(cells[id(card)][k], wd[k]), wd[k])
+                    color = colors.get(k)
+                    # the selected row is one reverse-video bar, so no inner resets
+                    parts.append(f"{fg(color)}{text}{RESET}" if color and not selected else text)
+                line = " ".join(parts)
+                if selected:
+                    line = f"{REV}{BOLD} \u25b6 {line}{RESET}"
+                else:
+                    line = f"   {line}"
+                rows.append((line, card))
+                if selected:
+                    # the selected row expands: each cell it cut or dropped,
+                    # in full, wrapped under the ID
+                    indent = 3 + wd["badge"] + 1
+                    c = cells[id(card)]
+                    colors["id"] = colors["title"] = None
+                    for k in keys[1:]:
+                        if display_width(c[k]) <= wd[k]:
+                            continue
+                        color = colors[k]
+                        for part in wrap_text(c[k], w - indent):
+                            text = " " * indent + part
+                            rows.append((f"{fg(color)}{text}{RESET}" if color else text, card))
+                    sel_end = len(rows) - 1
+        # keep the selected row and its expansion on screen, with its group
+        # title when it fits
+        off = self.scroll.get("__rows__", 0)
+        if sel_row < off:
+            off = max(0, sel_row - 2)
+        elif sel_end >= off + body_h:
+            off = min(sel_row, sel_end - body_h + 1)
+        off = min(off, max(0, len(rows) - body_h))
+        self.scroll["__rows__"] = off
+        for r, (text, card) in enumerate(rows[off : off + body_h]):
+            lines.append(text)
+            if card is not None:
+                self.card_regions.append((0, body_top + r, w, body_top + r + 1, card))
 
     def paint(self, frame: list[str], w: int, h: int) -> None:
         """Repaint only the lines that changed.
@@ -3867,6 +3998,7 @@ class UI:
         ("m", "message Firstmate"),
         ("1-9 / tab", "switch crew (All = fleet)"),
         ("L", "show/hide Landed"),
+        ("v", "rows / columns view"),
         ("A", "show/hide the calls you already answered"),
         ("r", "refresh the board"),
         ("? / esc", "close this help"),
@@ -4074,8 +4206,9 @@ class UI:
         also carry the thinking effort when the row has room for it.
         """
         base = (card.doing or "").strip()
-        if not base:
-            base = (card.status_text or "").strip()
+        full = (getattr(card, "status_text", "") or "").strip()
+        if not base or (base.endswith("\u2026") and full.startswith(base[:-1])):
+            base = full  # Firstmate cuts doing; the status file has it whole
         label = badge_label_from_badge(getattr(card, "badge", "") or "")
         low = base.lower()
         if low.startswith("harness busy") or (label and low.startswith(label)):
@@ -4189,9 +4322,9 @@ def parse_input(buf: bytes, ui: UI) -> bytes:
                     ui.dialog_scroll_by(max(1, ui.body_h // 3))
                 continue
             if code == b"A":
-                ui.card_idx = max(0, ui.card_idx - 1)
+                ui.move_card(-1)
             elif code == b"B":
-                ui.card_idx += 1
+                ui.move_card(1)
             elif code == b"C":
                 ui.col_idx = min(len(ui.columns) - 1, ui.col_idx + 1)
                 ui.card_idx = 0
@@ -4304,9 +4437,9 @@ def parse_input(buf: bytes, ui: UI) -> bytes:
         elif text in ("G",):
             ui.scroll_bound(bottom=True)
         elif text in ("j",):
-            ui.card_idx += 1
+            ui.move_card(1)
         elif text in ("k",):
-            ui.card_idx = max(0, ui.card_idx - 1)
+            ui.move_card(-1)
         elif text in ("l",):
             ui.col_idx = min(len(ui.columns) - 1, ui.col_idx + 1)
             ui.card_idx = 0
@@ -4317,6 +4450,8 @@ def parse_input(buf: bytes, ui: UI) -> bytes:
             ui.toggle_landed()
         elif text == "A":
             ui.toggle_answered()
+        elif text == "v":
+            ui.toggle_view()
         elif text == "o":
             ui.open_selected()
         elif text == "m":
